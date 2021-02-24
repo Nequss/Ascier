@@ -3,9 +3,9 @@ using ImageMagick;
 using Xabe.FFmpeg;
 using System.IO;
 using System.Threading;
-using Ascier.Makers;
 using System.Collections.Generic;
 using System.Windows;
+using Ascier.Converters;
 
 namespace Ascier
 {
@@ -23,9 +23,10 @@ namespace Ascier
                 Console.WriteLine($"Imported: {file}");
 
             foreach(string file in files)
-                new ImageMaker().Convert(file, false);
-
-            Console.ReadLine();
+            {
+                PictureConverter pictureConverter =  new PictureConverter(file);
+                pictureConverter.ConvertToPicture(pictureConverter.ConvertToAscii());
+            }
         }
     }
 }
