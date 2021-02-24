@@ -45,22 +45,19 @@ namespace Ascier.Makers
 
         void ShowSDLWindow(List<string> lines, MagickImage image)
         {
-            var window = new RenderWindow(new VideoMode((uint)image.Width, (uint)image.Height), "ASCII");
-            window.Clear(new Color(255, 255, 255));
+            var window = new RenderWindow(new VideoMode((uint)(image.Width * 8), (uint)(image.Height * 8)), "ASCII");
 
             string textToDisplay = string.Empty;
             foreach (string line in lines)
                 textToDisplay += line + "\n";
 
-            var text = new Text(textToDisplay, new Font("cour.ttf"), 1);
-            text.Color = new Color(0, 0, 0);
+            var text = new Text(textToDisplay, new Font("cour.ttf"), 1 *8);
 
             window.Draw(text);
-            window.Close();
 
-            Texture texture = new Texture((uint)image.Width, (uint)image.Height);
+            Texture texture = new Texture((uint)(image.Width * 8), (uint)(image.Height * 8));
             texture.Update(window);
-            texture.CopyToImage().SaveToFile(image.FileName + ".jpg");
+            texture.CopyToImage().SaveToFile(image.FileName + ".png");
         }
 
         void DisplayInConsole(List<string> lines)
