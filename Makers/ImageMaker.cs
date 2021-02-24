@@ -43,23 +43,24 @@ namespace Ascier.Makers
             }
         }
 
-        void ToImageFile(List<string> lines, MagickImage image)
-        { 
-
-        }
-
         void ShowSDLWindow(List<string> lines, MagickImage image)
         {
             var window = new RenderWindow(new VideoMode((uint)image.Width, (uint)image.Height), "ASCII");
+            window.Clear(new Color(255, 255, 255));
 
             string textToDisplay = string.Empty;
             foreach (string line in lines)
                 textToDisplay += line + "\n";
 
-            var text = new Text(textToDisplay, new Font("cour.ttf"), 7);
+            var text = new Text(textToDisplay, new Font("cour.ttf"), 1);
+            text.Color = new Color(0, 0, 0);
 
             window.Draw(text);
-            window.Display();
+            window.Close();
+
+            Texture texture = new Texture((uint)image.Width, (uint)image.Height);
+            texture.Update(window);
+            texture.CopyToImage().SaveToFile(image.FileName + ".jpg");
         }
 
         void DisplayInConsole(List<string> lines)
@@ -140,7 +141,7 @@ namespace Ascier.Makers
         {
             Console.WriteLine($"Resizing");
 
-            //var size = new MagickGeometry(100, 100);
+            //var size = new MagickGeometry(600, 600);
             //size.IgnoreAspectRatio = false;
             //image.Resize(size);
 
