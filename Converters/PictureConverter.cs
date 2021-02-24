@@ -65,6 +65,8 @@ namespace Ascier.Converters
             Texture texture = new Texture((uint)image.Width, (uint)image.Height);
             texture.Update(window);
             texture.CopyToImage().SaveToFile(image.FileName + ".png");
+
+            window.Close();
         }
     }
 }

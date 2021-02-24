@@ -13,19 +13,33 @@ namespace Ascier
     {
         static void Main(string[] args)
         {
-            Console.WriteLine($"Importing files from {$"{Directory.GetCurrentDirectory()}/images"} directory.");
 
-            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/images");
+            Console.WriteLine($"Importing files from {$"{Directory.GetCurrentDirectory()}/assets"} directory.");
+
+            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/assets");
 
             Console.WriteLine($"Files found: {files.Length}");
 
             foreach (string file in files)
                 Console.WriteLine($"Imported: {file}");
 
-            foreach(string file in files)
+            foreach (string file in files)
             {
-                PictureConverter pictureConverter =  new PictureConverter(file);
-                pictureConverter.ConvertToPicture(pictureConverter.ConvertToAscii());
+                string ext = Path.GetExtension(file);
+
+                switch (ext)
+                {
+                    case ".png": case ".jpg":
+                        PictureConverter pictureConverter = new PictureConverter(file);
+                        pictureConverter.ConvertToPicture(pictureConverter.ConvertToAscii());
+                        break;
+
+                    case ".gif":
+                        GifConverter gifConverter = new GifConverter(file);
+                        gifConverter.ConvertToAscii();
+                        gifConverter.ConvertToGif(gifConverter.asciiCollection);
+                        break;
+                }
             }
         }
     }
