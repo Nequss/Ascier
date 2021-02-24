@@ -44,6 +44,13 @@ namespace Ascier.Makers
         { 
 
         }
+
+        void DisplayInConsole(List<string> lines)
+        {
+            foreach (string line in lines)
+                Console.WriteLine(line);
+        }
+
         public override void Convert(string path, bool html)
         {
             Console.WriteLine($"Converting {path}");
@@ -98,7 +105,7 @@ namespace Ascier.Makers
             Console.WriteLine($"Finished getting text");
             Console.WriteLine($"Ascii rows: {lines.Count}");
             Console.WriteLine($"Started saving text to file");
-
+             
             if (html)
                 ToHtmlFile(lines, Path.GetFileNameWithoutExtension(path));
             else
@@ -116,7 +123,7 @@ namespace Ascier.Makers
         {
             Console.WriteLine($"Resizing");
 
-            var size = new MagickGeometry(40, 40);
+            var size = new MagickGeometry(100, 100);
             size.IgnoreAspectRatio = false;
             image.Resize(size);
 
