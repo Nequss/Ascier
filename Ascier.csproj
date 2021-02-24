@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="7.23.2" />
-    <PackageReference Include="sdl2" Version="2.0.5" />
+    <PackageReference Include="SFML.Net" Version="2.5.0" />
     <PackageReference Include="Xabe.FFmpeg" Version="4.4.0" />
   </ItemGroup>
 

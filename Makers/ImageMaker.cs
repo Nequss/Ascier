@@ -8,6 +8,9 @@ using Ascier.Makers.Base;
 using System.Threading.Tasks;
 using System.Text;
 using System.Collections.Generic;
+using SFML.Graphics;
+using SFML.Window;
+using SFML.System;
 
 namespace Ascier.Makers
 {
@@ -43,6 +46,20 @@ namespace Ascier.Makers
         void ToImageFile(List<string> lines, MagickImage image)
         { 
 
+        }
+
+        void ShowSDLWindow(List<string> lines, MagickImage image)
+        {
+            var window = new RenderWindow(new VideoMode((uint)image.Width, (uint)image.Height), "ASCII");
+
+            string textToDisplay = string.Empty;
+            foreach (string line in lines)
+                textToDisplay += line + "\n";
+
+            var text = new Text(textToDisplay, new Font("cour.ttf"), 7);
+
+            window.Draw(text);
+            window.Display();
         }
 
         void DisplayInConsole(List<string> lines)
@@ -114,7 +131,7 @@ namespace Ascier.Makers
             Console.WriteLine($"Finished saving text");
             Console.WriteLine($"Starting writting on image");
 
-            ToImageFile(lines, image);
+            ShowSDLWindow(lines, image);
 
             Console.WriteLine($"Finished {path}");
         }
@@ -123,9 +140,9 @@ namespace Ascier.Makers
         {
             Console.WriteLine($"Resizing");
 
-            var size = new MagickGeometry(100, 100);
-            size.IgnoreAspectRatio = false;
-            image.Resize(size);
+            //var size = new MagickGeometry(100, 100);
+            //size.IgnoreAspectRatio = false;
+            //image.Resize(size);
 
             Console.WriteLine($"Finished resizing");
 
