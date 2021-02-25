@@ -19,13 +19,13 @@ namespace Ascier
         {
             Display.start();
             
-            Console.WriteLine($"Importing files");
+            Logger.info($"Importing files");
             string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/files");
-            Console.WriteLine($"Files found: {files.Length}");
+            Logger.info($"Files found: {files.Length}");
 
 
             foreach (string file in files)
-                Console.WriteLine($"Imported: {file}");
+                Logger.info($"Imported: {file}");
 
             foreach (string file in files)
             {
