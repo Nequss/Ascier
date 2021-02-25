@@ -11,4 +11,10 @@
     <PackageReference Include="Xabe.FFmpeg" Version="4.4.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="CLI_Sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>CLI_Sharp.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>
