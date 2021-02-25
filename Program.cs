@@ -17,6 +17,7 @@ namespace Ascier
         public static ConsoleDisplay Display = new ConsoleDisplay(Logger,Processor);
         static void Main(string[] args)
         {
+            Display.dynamicRefresh = false;
             Display.start();
             
             Logger.info($"Importing files");
