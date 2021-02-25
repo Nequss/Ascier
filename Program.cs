@@ -6,19 +6,26 @@ using System.Threading;
 using System.Collections.Generic;
 using System.Windows;
 using Ascier.Converters;
+using CLI_Sharp;
 
 namespace Ascier
 {
     class Program
     {
+        public static Logger Logger = new Logger();
+        public static MyProcessor Processor = new MyProcessor();
+        public static ConsoleDisplay Display = new ConsoleDisplay(Logger,Processor);
         static void Main(string[] args)
         {
-            Console.WriteLine($"Importing files");
+            Display.dynamicRefresh = false;
+            Display.start();
+            
+            Logger.info($"Importing files");
             string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/files");
-            Console.WriteLine($"Files found: {files.Length}");
+            Logger.info($"Files found: {files.Length}");
 
             foreach (string file in files)
-                Console.WriteLine($"Imported: {Path.GetFileName(file)}");
+                Logger.info($"Imported: {file}");
 
             foreach (string file in files)
             {
