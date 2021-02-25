@@ -14,31 +14,13 @@ namespace Ascier
     {
         public static Logger Logger = new Logger();
         public static MyProcessor Processor = new MyProcessor();
-        public static ConsoleDisplay Display = new ConsoleDisplay(Logger,Processor);
-        static void Main(string[] args)
+        public static ConsoleDisplay Display = new ConsoleDisplay(Logger, Processor);
+        static void Main()
         {
-            Display.dynamicRefresh = false;
+            Display.dynamicRefresh = true;
             Display.start();
-            
-            Logger.info($"Importing files");
-            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/files");
-            Logger.info($"Files found: {files.Length}");
 
-            foreach (string file in files)
-                Logger.info($"Imported: {file}");
-
-            foreach (string file in files)
-            {
-                string ext = Path.GetExtension(file);
-
-                switch (ext)
-                {
-                    case ".png": case ".jpg":
-                        break;
-                }
-            }
-
-            Console.ReadKey();
+            Logger.info("CLI has started");
         }
     }
 }

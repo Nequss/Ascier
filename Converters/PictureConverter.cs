@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using Ascier.Converters.Base;
+using Ascier.Elements;
 using ImageMagick;
 using SFML.Graphics;
 using SFML.System;
@@ -11,64 +12,49 @@ using SFML.Window;
 
 namespace Ascier.Converters
 {
-    class PictureConverter : Converter
+    public class PictureConverter : Converter
     {
         public MagickImage image;
 
-        public PictureConverter(string path)
+        public PictureConverter(MagickImage _image)
         {
-            image = new MagickImage(path);
-        }
-        public PictureConverter()
-        {
-
+            image = _image;
         }
 
-        public string ConvertToAscii()
+        public override List<PixelEntity> MakePixels()
         {
-            string ascii = string.Empty;
-
+            List<PixelEntity> pixelEntities = new List<PixelEntity>();
+                
             int index;
 
             foreach (var pixel in image.GetPixels())
             {
+                var pixelColor = pixel.ToColor();
+
                 if (pixel.ToColor().A == 0)
                     index = 10;
                 else
-                    index = pixel.ToColor().R / 25;
+                    index = pixelColor.R / 25;
 
-                if (pixel.X == image.Width - 1)
-                    ascii += $"{(char)chars[index]}\n";
-                else
-                    ascii += $"{(char)chars[index]}";
-            }
+                pixelEntities.Add(new PixelEntity(
+                        chars[index],
+                        new Color(pixelColor.R, pixelColor.G, pixelColor.B),
+                        new Vector2f(pixel.X, pixel.Y),
+                        font));
+             }
 
-            return ascii;
+            return pixelEntities;
         }
 
-        public void ConvertToPictureGreyscale(string ascii)
+        public override void SaveToFile()
         {
-            Console.WriteLine($"Converting to picture");
-
-            var text = new Text(ascii, new Font("cour.ttf"), 15);
-
-            text.FillColor = Color.Black;
-            text.Position = new Vector2f(0, 0);
-
-            var bounds = text.GetGlobalBounds();
-            var window = new RenderWindow(new VideoMode((uint)bounds.Width, (uint)bounds.Height), "ASCII");
-
-            window.SetVisible(false);
-            window.Clear(Color.White);
-            window.Draw(text);
-
+            /*
             Texture texture = new Texture((uint)bounds.Width, (uint)bounds.Height);
             texture.Update(window);
             texture.CopyToImage().SaveToFile(image.FileName + ".png");
+            */
 
-            window.Close();
-
-            Console.WriteLine($"finished to picture");
+            throw new NotImplementedException();
         }
     }
 }
