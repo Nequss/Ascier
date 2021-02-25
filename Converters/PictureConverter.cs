@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using System.Threading;
 using Ascier.Converters.Base;
 using ImageMagick;
 using SFML.Graphics;
+using SFML.System;
 using SFML.Window;
 
 namespace Ascier.Converters
@@ -13,6 +14,7 @@ namespace Ascier.Converters
     class PictureConverter : Converter
     {
         public MagickImage image;
+
         public PictureConverter(string path)
         {
             image = new MagickImage(path);
@@ -26,47 +28,47 @@ namespace Ascier.Converters
         {
             string ascii = string.Empty;
 
+            int index;
+
             foreach (var pixel in image.GetPixels())
             {
                 if (pixel.ToColor().A == 0)
-                {
-                    if (pixel.X == image.Width - 1)
-                    {
-                        ascii += $"{(char)chars[10]}\n";
-                    }
-                    else
-                    {
-                        ascii += $"{(char)chars[10]}";
-                    }
-                }
+                    index = 10;
                 else
-                {
-                    if (pixel.X == image.Width - 1)
-                    {
-                        ascii += $"{(char)chars[(pixel.ToColor().R + pixel.ToColor().G + pixel.ToColor().B) / 3 * 10 / 255]}\n";
-                    }
-                    else
-                    {
-                        ascii += (char)chars[(pixel.ToColor().R + pixel.ToColor().G + pixel.ToColor().B) / 3 * 10 / 255];
-                    }
-                }
+                    index = pixel.ToColor().R / 25;
+
+                if (pixel.X == image.Width - 1)
+                    ascii += $"{(char)chars[index]}\n";
+                else
+                    ascii += $"{(char)chars[index]}";
             }
 
             return ascii;
         }
 
-        public void ConvertToPicture(string ascii)
+        public void ConvertToPictureGreyscale(string ascii)
         {
-            var window = new RenderWindow(new VideoMode((uint)image.Width, (uint)image.Height), "ASCII");
-            var text = new Text(ascii, new Font("cour.ttf"), 1);
+            Console.WriteLine($"Converting to picture");
 
+            var text = new Text(ascii, new Font("cour.ttf"), 15);
+
+            text.FillColor = Color.Black;
+            text.Position = new Vector2f(0, 0);
+
+            var bounds = text.GetGlobalBounds();
+            var window = new RenderWindow(new VideoMode((uint)bounds.Width, (uint)bounds.Height), "ASCII");
+
+            window.SetVisible(false);
+            window.Clear(Color.White);
             window.Draw(text);
 
-            Texture texture = new Texture((uint)image.Width, (uint)image.Height);
+            Texture texture = new Texture((uint)bounds.Width, (uint)bounds.Height);
             texture.Update(window);
             texture.CopyToImage().SaveToFile(image.FileName + ".png");
 
             window.Close();
+
+            Console.WriteLine($"finished to picture");
         }
     }
 }

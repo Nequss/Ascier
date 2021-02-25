@@ -13,12 +13,10 @@ namespace Ascier
     {
         static void Main(string[] args)
         {
-
-            Console.WriteLine($"Importing files from {$"{Directory.GetCurrentDirectory()}/assets"} directory.");
-
-            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/assets");
-
+            Console.WriteLine($"Importing files");
+            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/files");
             Console.WriteLine($"Files found: {files.Length}");
+
 
             foreach (string file in files)
                 Console.WriteLine($"Imported: {file}");
@@ -30,17 +28,11 @@ namespace Ascier
                 switch (ext)
                 {
                     case ".png": case ".jpg":
-                        PictureConverter pictureConverter = new PictureConverter(file);
-                        pictureConverter.ConvertToPicture(pictureConverter.ConvertToAscii());
-                        break;
-
-                    case ".gif":
-                        GifConverter gifConverter = new GifConverter(file);
-                        gifConverter.ConvertToAscii();
-                        gifConverter.ConvertToGif(gifConverter.asciiCollection);
                         break;
                 }
             }
+
+            Console.ReadKey();
         }
     }
 }

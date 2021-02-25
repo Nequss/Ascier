@@ -4,10 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Ascier.Converters
+namespace Ascier.Display.Elements
 {
-    class VideoConverter
+    class Pixel
     {
-
     }
 }
