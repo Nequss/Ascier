@@ -17,9 +17,8 @@ namespace Ascier
             string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/files");
             Console.WriteLine($"Files found: {files.Length}");
 
-
             foreach (string file in files)
-                Console.WriteLine($"Imported: {file}");
+                Console.WriteLine($"Imported: {Path.GetFileName(file)}");
 
             foreach (string file in files)
             {
