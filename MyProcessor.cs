@@ -16,7 +16,7 @@ namespace Ascier
                     manager.Import();
                     break;
                 case "s":
-                    manager.Show("kiana");
+                    manager.Show("laki");
                     break;
             }
         }

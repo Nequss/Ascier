@@ -19,20 +19,13 @@ namespace Ascier.Screen
             var window = new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "ASCII");
 
             window.SetVisible(true);
-            window.Clear(Color.Black);
+            window.Clear(Color.White);
 
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < 50; i++)
                 foreach (var pixel in pixelEntities)
                     window.Draw(pixel.GetPixel(scale));
 
             window.Display();
-
-            window.Closed += (_, __) => window.Close();
-
-            while (window.IsOpen)
-            {
-                window.DispatchEvents();
-            }
         }
 
         public void ShowGif()
