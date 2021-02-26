@@ -41,7 +41,7 @@ namespace Ascier
                 Program.Logger.info("Displaying");
 
                 display = new Display();
-                display.ShowPicture(pictureConverter.MakePixels(), 1, pictureConverter.image);
+                display.ShowPicture(pictureConverter.MakePixels(), 10, pictureConverter.image);
 
                 Program.Logger.info("Finished");
             }

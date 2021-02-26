@@ -24,7 +24,8 @@ namespace Ascier.Elements
             position = _position;
             color = _color;
             font = _font;
-            text = new Text();
+
+            text = new Text(((char)character).ToString(), font);
         }
 
         public Text GetPixel(uint scale)

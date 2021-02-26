@@ -23,30 +23,34 @@ namespace Ascier.Converters
 
         public override List<PixelEntity> MakePixels()
         {
+            MagickGeometry mg = new MagickGeometry(100);
+            mg.IgnoreAspectRatio = false;
+            image.Resize(mg);
+
             List<PixelEntity> pixelEntities = new List<PixelEntity>();
                 
-            int index;
-
             foreach (var pixel in image.GetPixels())
             {
                 var pixelColor = pixel.ToColor();
 
+                byte red   = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
+                byte green = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
+                byte blue  = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
+
+                Color grayColor = new Color(red, green, blue);
+
                 if (pixel.ToColor().A == 0)
                 {
-                    index = 10;
-
                     pixelEntities.Add(new PixelEntity(
-                        chars[index],
-                        new Color(255, 255, 255),
+                        chars[10],
+                        Color.White,
                         new Vector2f(pixel.X, pixel.Y),
                         font));
                 }
                 else
                 {
-                    index = pixelColor.R / 25;
-
                     pixelEntities.Add(new PixelEntity(
-                        chars[index],
+                        chars[grayColor.R / 25],
                         new Color(pixelColor.R, pixelColor.G, pixelColor.B),
                         new Vector2f(pixel.X, pixel.Y),
                         font));

@@ -17,10 +17,19 @@ namespace Ascier
         public static ConsoleDisplay Display = new ConsoleDisplay(Logger, Processor);
         static void Main()
         {
-            Display.dynamicRefresh = true;
-            Display.start();
+            //Display.dynamicRefresh = true;
+            //Display.start();
 
             Logger.info("CLI has started");
+            Test();
+        }
+
+        static void Test()
+        {
+            Manager manager = new Manager();
+
+            manager.Import();
+            manager.Show("momo");
         }
     }
 }
