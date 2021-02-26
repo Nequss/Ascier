@@ -24,11 +24,12 @@ namespace Ascier.Elements
             position = _position;
             color = _color;
             font = _font;
+            text = new Text();
         }
 
         public Text GetPixel(uint scale)
         {
-            text.FillColor = new Color(color.R, color.G, color.B);
+            text.FillColor = color;
             text.CharacterSize = scale;
             text.Position = new Vector2f(position.X * scale, position.Y * scale);
 

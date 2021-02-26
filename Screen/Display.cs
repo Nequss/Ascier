@@ -14,21 +14,20 @@ namespace Ascier.Screen
 {
     public class Display
     {
-        public void ShowPicture(List<PixelEntity> pixelEntities, uint scale)
+        public void ShowPicture(List<PixelEntity> pixelEntities, uint scale, MagickImage image)
         {
-            var window = new RenderWindow(new VideoMode
-            (
-                (uint)pixelEntities[pixelEntities.Count - 1].position.X,
-                (uint)pixelEntities[pixelEntities.Count - 1].position.Y
-            ), "ASCII");
+            var window = new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "ASCII");
 
             window.SetVisible(true);
             window.Clear(Color.White);
+            window.Closed += (_, __) => window.Close();
 
-            foreach(var pixel in pixelEntities)
+            window.DispatchEvents();
+
+            foreach (var pixel in pixelEntities)
                 window.Draw(pixel.GetPixel(scale));
 
-            window.Close();
+            window.Display();
         }
 
         public void ShowGif()

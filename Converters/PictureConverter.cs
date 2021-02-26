@@ -32,15 +32,25 @@ namespace Ascier.Converters
                 var pixelColor = pixel.ToColor();
 
                 if (pixel.ToColor().A == 0)
+                {
                     index = 10;
+
+                    pixelEntities.Add(new PixelEntity(
+                        chars[index],
+                        new Color(255, 255, 255),
+                        new Vector2f(pixel.X, pixel.Y),
+                        font));
+                }
                 else
+                {
                     index = pixelColor.R / 25;
 
-                pixelEntities.Add(new PixelEntity(
+                    pixelEntities.Add(new PixelEntity(
                         chars[index],
                         new Color(pixelColor.R, pixelColor.G, pixelColor.B),
                         new Vector2f(pixel.X, pixel.Y),
                         font));
+                }
              }
 
             return pixelEntities;

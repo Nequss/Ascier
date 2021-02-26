@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Ascier.Converters;
 using Ascier.Screen;
 using ImageMagick;
+
 namespace Ascier
 {
     class Manager
@@ -38,8 +39,11 @@ namespace Ascier
                 pictureConverter = new PictureConverter(new MagickImage(path));
 
                 Program.Logger.info("Displaying");
+
                 display = new Display();
-                display.ShowPicture(pictureConverter.MakePixels(), 1);
+                display.ShowPicture(pictureConverter.MakePixels(), 1, pictureConverter.image);
+
+                Program.Logger.info("Finished");
             }
             else
             {
