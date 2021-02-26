@@ -13,7 +13,7 @@ namespace Ascier.Converters.Base
     {
         public byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
 
-        public Font font = new Font("cour.ttf");
+        public static Font font = new Font("cour.ttf");
 
         public abstract List<PixelEntity> MakePixels();
 

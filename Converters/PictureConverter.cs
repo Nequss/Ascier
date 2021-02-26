@@ -44,16 +44,14 @@ namespace Ascier.Converters
                     pixelEntities.Add(new PixelEntity(
                         chars[10],
                         Color.White,
-                        new Vector2f(pixel.X, pixel.Y),
-                        font));
+                        new Vector2f(pixel.X, pixel.Y)));
                 }
                 else
                 {
                     pixelEntities.Add(new PixelEntity(
                         chars[grayColor.R / 25],
                         new Color(pixelColor.R, pixelColor.G, pixelColor.B),
-                        new Vector2f(pixel.X, pixel.Y),
-                        font));
+                        new Vector2f(pixel.X, pixel.Y)));
                 }
              }
 
