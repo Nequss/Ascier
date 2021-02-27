@@ -14,10 +14,5 @@ namespace Ascier.Converters
         {
             throw new NotImplementedException();
         }
-
-        public override void SaveToFile()
-        {
-            throw new NotImplementedException();
-        }
     }
 }

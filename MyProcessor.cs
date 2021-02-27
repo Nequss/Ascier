@@ -15,8 +15,8 @@ namespace Ascier
                 case "i":
                     manager.Import();
                     break;
-                case "s":
-                    manager.Show("laki");
+                case "s": //hardcoded name of file
+                    manager.Show("kiana");
                     break;
             }
         }

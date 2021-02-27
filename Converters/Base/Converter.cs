@@ -17,7 +17,6 @@ namespace Ascier.Converters.Base
 
         public abstract List<PixelEntity> MakePixels();
 
-        public abstract void SaveToFile();
 
     }
 }

@@ -40,8 +40,8 @@ namespace Ascier
 
                 Program.Logger.info("Displaying");
 
-                display = new Display();
-                display.ShowPicture(pictureConverter.MakePixels(), 10, pictureConverter.image);
+                display = new Display(pictureConverter.MakePixels(), 10, pictureConverter.image);
+                display.Preview();
 
                 Program.Logger.info("Finished");
             }
@@ -49,11 +49,6 @@ namespace Ascier
             {
                 Program.Logger.info("File not found!");
             }
-        }
-
-        public void ConvertImages()
-        {
-
         }
 
         public void Import()

@@ -59,16 +59,5 @@ namespace Ascier.Converters
 
             return pixelEntities;
         }
-
-        public override void SaveToFile()
-        {
-            /*
-            Texture texture = new Texture((uint)bounds.Width, (uint)bounds.Height);
-            texture.Update(window);
-            texture.CopyToImage().SaveToFile(image.FileName + ".png");
-            */
-
-            throw new NotImplementedException();
-        }
     }
 }
