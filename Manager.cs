@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Ascier.Converters;
 using Ascier.Screen;
 using ImageMagick;
+using SFML.Graphics;
+using SFML.Window;
 
 namespace Ascier
 {
@@ -35,13 +37,18 @@ namespace Ascier
             if (path != null)
             {
                 Program.Logger.info("File found");
-                Program.Logger.info("Starting conversion");
-                pictureConverter = new PictureConverter(new MagickImage(path));
 
-                Program.Logger.info("Displaying");
+                MagickImage image = new MagickImage(path);
 
-                display = new Display(pictureConverter.MakePixels(), 10, pictureConverter.image);
-                display.Preview();
+                MagickGeometry mg = new MagickGeometry(100); //lower - bigger chars
+                mg.IgnoreAspectRatio = false;
+                image.Resize(mg);
+
+                uint scale = 5;
+
+                display = new Display(scale, image);
+
+                display.PreviewFrame(new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "Frame preview/configuration"));
 
                 Program.Logger.info("Finished");
             }

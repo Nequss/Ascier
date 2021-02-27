@@ -14,19 +14,8 @@ namespace Ascier.Converters
 {
     public class PictureConverter : Converter
     {
-        public MagickImage image;
-
-        public PictureConverter(MagickImage _image)
+        public override List<PixelEntity> MakePixels(MagickImage image)
         {
-            image = _image;
-        }
-
-        public override List<PixelEntity> MakePixels()
-        {
-            MagickGeometry mg = new MagickGeometry(100);
-            mg.IgnoreAspectRatio = false;
-            image.Resize(mg);
-
             List<PixelEntity> pixelEntities = new List<PixelEntity>();
                 
             foreach (var pixel in image.GetPixels())

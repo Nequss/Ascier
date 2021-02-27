@@ -8,15 +8,13 @@ namespace Ascier
 
         public override void processCommand(string cmd)
         {
-            Program.Logger.info("Waiting for command");
-
             switch (cmd)
             {
                 case "i":
                     manager.Import();
                     break;
-                case "s": //hardcoded name of file
-                    manager.Show("kiana");
+                case "s": 
+                    manager.Show("momo"); //name of file in input folder
                     break;
             }
         }

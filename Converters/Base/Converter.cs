@@ -15,7 +15,7 @@ namespace Ascier.Converters.Base
 
         public static Font font = new Font("cour.ttf");
 
-        public abstract List<PixelEntity> MakePixels();
+        public abstract List<PixelEntity> MakePixels(MagickImage image);
 
 
     }
