@@ -13,25 +13,23 @@ namespace Ascier.Elements
 {
     public class PixelEntity
     {
-        public byte character;
+        public char character;
         public Vector2f position;
         public Color color;
         public static Font font = Converter.font;
         public static Text text = new Text(" ", font);
 
-        public PixelEntity(byte _character, Color _color, Vector2f _position)
+        public PixelEntity(char _character, Color _color, Vector2f _position)
         {
-            character = _character;
+            character = (char)_character;
             position = _position;
             color = _color;
-
-            text.DisplayedString = character.ToString();
         }
 
         public Text GetPixel(uint scale)
         {
             text.FillColor = color;
-            text.CharacterSize = scale;
+            text.DisplayedString = character.ToString();
             text.Position = new Vector2f(position.X * scale, position.Y * scale);
 
             return text;

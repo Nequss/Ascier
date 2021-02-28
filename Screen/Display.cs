@@ -17,12 +17,14 @@ namespace Ascier.Screen
         byte index = 0;
         uint scale;
         bool mode;
+        public Vector2i size { get; private set; }
 
-        MagickImage image;
+        private String imgPath;
 
-        public Display(uint _scale, MagickImage _image)
+        public Display(uint _scale, String path)
         {
-            image = _image;
+            size = (Vector2i)new Image(path).Size;
+            imgPath = path;
             scale = _scale;
         }
 
@@ -50,7 +52,7 @@ namespace Ascier.Screen
                 case Keyboard.Key.Up:
                     scale++;
                     window.Close();
-                    PreviewFrame(new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "Frame preview/configuration"));
+                    PreviewFrame(new RenderWindow(new VideoMode((uint)size.X * scale, (uint)size.Y * scale), "Frame preview/configuration"));
                     break;
 
                 case Keyboard.Key.Down:
@@ -60,7 +62,7 @@ namespace Ascier.Screen
                         scale = 1;
 
                     window.Close();
-                    PreviewFrame(new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "Frame preview/configuration"));
+                    PreviewFrame(new RenderWindow(new VideoMode((uint)size.X * scale, (uint)size.Y * scale), "Frame preview/configuration"));
                     break;
 
                 case Keyboard.Key.R:
@@ -109,7 +111,9 @@ namespace Ascier.Screen
 
         public void Draw(RenderWindow window)
         {
-            foreach (var pixel in new PictureConverter().MakePixels(image))
+            PixelEntity.text.CharacterSize = 4*scale;
+            
+            foreach (var pixel in new PictureConverter().MakePixels(imgPath))
                 window.Draw(pixel.GetPixel(scale));
 
             window.Display();

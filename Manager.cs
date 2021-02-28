@@ -38,17 +38,11 @@ namespace Ascier
             {
                 Program.Logger.info("File found");
 
-                MagickImage image = new MagickImage(path);
+                uint scale = 2;
 
-                MagickGeometry mg = new MagickGeometry(100); //lower - bigger chars
-                mg.IgnoreAspectRatio = false;
-                image.Resize(mg);
+                display = new Display(scale, path);
 
-                uint scale = 5;
-
-                display = new Display(scale, image);
-
-                display.PreviewFrame(new RenderWindow(new VideoMode((uint)image.Width * scale, (uint)image.Height * scale), "Frame preview/configuration"));
+                display.PreviewFrame(new RenderWindow(new VideoMode((uint)display.size.X * scale, (uint)display.size.Y * scale), "Frame preview/configuration"));
 
                 Program.Logger.info("Finished");
             }

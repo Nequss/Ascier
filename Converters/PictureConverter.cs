@@ -14,6 +14,8 @@ namespace Ascier.Converters
 {
     public class PictureConverter : Converter
     {
+        public int stepSize = 4;
+        
         public override List<PixelEntity> MakePixels(MagickImage image)
         {
             List<PixelEntity> pixelEntities = new List<PixelEntity>();
@@ -31,20 +33,40 @@ namespace Ascier.Converters
                 if (pixel.ToColor().A == 0)
                 {
                     pixelEntities.Add(new PixelEntity(
-                        chars[10],
+                        (char)chars[10],
                         Color.White,
                         new Vector2f(pixel.X, pixel.Y)));
                 }
                 else
                 {
                     pixelEntities.Add(new PixelEntity(
-                        chars[grayColor.R / 25],
+                        (char)chars[grayColor.R / 25],
                         new Color(pixelColor.R, pixelColor.G, pixelColor.B),
                         new Vector2f(pixel.X, pixel.Y)));
                 }
              }
 
             return pixelEntities;
+        }
+
+        public List<PixelEntity> MakePixels(String img)
+        {
+            List<PixelEntity> tmpPixels = new List<PixelEntity>();
+            var image = new Image(img);
+
+            for (int i = 0; i < image.Size.X; i+=stepSize)
+            {
+                for (int j = 0; j < image.Size.Y; j+=stepSize)
+                {
+                    var tmpPixel = image.GetPixel((uint) i,(uint) j);
+                    
+                    tmpPixels.Add(
+                        new PixelEntity((char)chars[tmpPixel.R/25],
+                            new Color(tmpPixel.R, tmpPixel.G, tmpPixel.B),
+                            new Vector2f(i,j)));
+                }
+            }
+            return tmpPixels;
         }
     }
 }
