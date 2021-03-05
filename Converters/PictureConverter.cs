@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using Ascier.Converters.Base;
-using Ascier.Elements;
 using ImageMagick;
 using SFML.Graphics;
 using SFML.System;
@@ -12,61 +10,57 @@ using SFML.Window;
 
 namespace Ascier.Converters
 {
-    public class PictureConverter : Converter
+    public class PictureConverter
     {
-        public int stepSize = 4;
-        
-        public override List<PixelEntity> MakePixels(MagickImage image)
+        byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
+
+        private Text text = new Text(" ", new Font("font.ttf"));
+        private Vector2f position = new Vector2f();
+
+        public void DrawPreview(RenderWindow window, bool mode, string path, uint fontSize)
         {
-            List<PixelEntity> pixelEntities = new List<PixelEntity>();
-                
-            foreach (var pixel in image.GetPixels())
+            window.Clear(Color.Black);
+
+            var image = new Image(path);
+
+            for (uint y = fontSize / 2; y < image.Size.Y; y += fontSize)
             {
-                var pixelColor = pixel.ToColor();
-
-                byte red   = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
-                byte green = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
-                byte blue  = (byte)((pixelColor.R + pixelColor.G + pixelColor.B) / 3);
-
-                Color grayColor = new Color(red, green, blue);
-
-                if (pixel.ToColor().A == 0)
+                for (uint x = fontSize / 2; x < image.Size.X; x += fontSize)
                 {
-                    pixelEntities.Add(new PixelEntity(
-                        (char)chars[10],
-                        Color.White,
-                        new Vector2f(pixel.X, pixel.Y)));
-                }
-                else
-                {
-                    pixelEntities.Add(new PixelEntity(
-                        (char)chars[grayColor.R / 25],
-                        new Color(pixelColor.R, pixelColor.G, pixelColor.B),
-                        new Vector2f(pixel.X, pixel.Y)));
-                }
-             }
+                    var tmpPixel = image.GetPixel((uint) x,(uint) y);
+                    var greyPixel = GetGreyscale(tmpPixel);
 
-            return pixelEntities;
-        }
+                    if(mode) //color mode
+                    {
+                        position.X = x;
+                        position.Y = y;
+                        text.Position = position;
+                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
+                        text.CharacterSize = fontSize;
+                        text.FillColor = tmpPixel;
+                    }
+                    else //greyscale mode
+                    {
+                        position.X = x;
+                        position.Y = y;
+                        text.Position = position;
+                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
+                        text.CharacterSize = fontSize;
+                        text.FillColor = greyPixel;
+                    }
 
-        public List<PixelEntity> MakePixels(String img)
-        {
-            List<PixelEntity> tmpPixels = new List<PixelEntity>();
-            var image = new Image(img);
-
-            for (int i = 0; i < image.Size.X; i+=stepSize)
-            {
-                for (int j = 0; j < image.Size.Y; j+=stepSize)
-                {
-                    var tmpPixel = image.GetPixel((uint) i,(uint) j);
-                    
-                    tmpPixels.Add(
-                        new PixelEntity((char)chars[tmpPixel.R/25],
-                            new Color(tmpPixel.R, tmpPixel.G, tmpPixel.B),
-                            new Vector2f(i,j)));
+                    window.Draw(text);
                 }
             }
-            return tmpPixels;
+        }
+
+        private Color GetGreyscale(Color pixelColor)
+        {
+            int red = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
+            int green = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
+            int blue = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
+
+            return new Color((byte)red, (byte)green, (byte)blue);
         }
     }
 }

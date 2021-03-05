@@ -1,5 +1,4 @@
 ﻿using Ascier.Converters;
-using Ascier.Elements;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,28 +13,29 @@ namespace Ascier.Screen
 {
     public class Display
     {
-        byte index = 0;
-        uint scale;
-        bool mode;
+        PictureConverter pictureConverter = new PictureConverter();
         public Vector2i size { get; private set; }
 
-        private String imgPath;
+        private string path;
 
-        public Display(uint _scale, String path)
+        private uint fontSize = 2;
+        private bool mode = true;
+
+        public Display(string _path)
         {
+            path = _path;
             size = (Vector2i)new Image(path).Size;
-            imgPath = path;
-            scale = _scale;
         }
 
-        public void PreviewFrame(RenderWindow window)
+        public void PreviewFrame()
         {
+            RenderWindow window = new RenderWindow(new VideoMode((uint)size.X, (uint)size.Y), "ASCII Preview");
             window.SetVisible(true);
 
             window.Closed += (_, __) => window.Close();
             window.KeyReleased += Window_KeyReleased;
 
-            Draw(window);
+            Draw(window, mode, fontSize);
 
             while (window.IsOpen)
             {
@@ -49,73 +49,33 @@ namespace Ascier.Screen
 
             switch (e.Code)
             {
-                case Keyboard.Key.Up:
-                    scale++;
-                    window.Close();
-                    PreviewFrame(new RenderWindow(new VideoMode((uint)size.X * scale, (uint)size.Y * scale), "Frame preview/configuration"));
+                case Keyboard.Key.Right:
+                    fontSize += 2;
+                    Draw(window, mode, fontSize);
                     break;
 
-                case Keyboard.Key.Down:
-                    scale--;
-
-                    if (scale <= 1)
-                        scale = 1;
-
-                    window.Close();
-                    PreviewFrame(new RenderWindow(new VideoMode((uint)size.X * scale, (uint)size.Y * scale), "Frame preview/configuration"));
-                    break;
-
-                case Keyboard.Key.R:
-                    window.Clear(new Color(
-                        (byte)new Random().Next(256),
-                        (byte)new Random().Next(256),
-                        (byte)new Random().Next(256)));
-                    Draw(window);
-                    break;
-
-                case Keyboard.Key.B:
-                    Color[] colorArray = {
-                        Color.Blue,
-                        Color.White,
-                        Color.Cyan,
-                        Color.Green,
-                        Color.Magenta,
-                        Color.Red,
-                        Color.Black,
-                        Color.Yellow };
-
-                    for (int i = 0; i < colorArray.Length; i++)
+                case Keyboard.Key.Left:
+                    if (fontSize <= 2)
                     {
-                        if (i == index)
-                        {
-                            index += 1;
-
-                            if (index > colorArray.Length - 1)
-                            {
-                                index = 0;
-                                window.Clear(colorArray[index]);
-                                Draw(window);
-                            }
-                            else
-                            {
-                                window.Clear(colorArray[index]);
-                                Draw(window);
-                            }
-
-                            break;
-                        }
+                        fontSize = 2;
                     }
+                    else
+                    {
+                        fontSize -= 2;
+                        Draw(window, mode, fontSize);
+                    }
+                    break;
+
+                case Keyboard.Key.C:
+                    mode = !mode;
+                    Draw(window, mode, fontSize);
                     break;
             }
         }
 
-        public void Draw(RenderWindow window)
+        private void Draw(RenderWindow window, bool mode, uint fontSize)
         {
-            PixelEntity.text.CharacterSize = 4*scale;
-            
-            foreach (var pixel in new PictureConverter().MakePixels(imgPath))
-                window.Draw(pixel.GetPixel(scale));
-
+            pictureConverter.DrawPreview(window, mode, path, fontSize);
             window.Display();
         }
     }
