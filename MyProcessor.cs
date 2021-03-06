@@ -12,9 +12,6 @@ namespace Ascier
         {
             switch (cmd)
             {
-                case "i":
-                    Import();
-                    break;
                 default:
                     Preview(cmd);
                     break;
@@ -34,8 +31,6 @@ namespace Ascier
 
                 Display display = new Display(path);
                 display.PreviewFrame();
-
-
             }
             else
             {
@@ -50,31 +45,6 @@ namespace Ascier
                     return path;
 
             return null;
-        }
-
-        private void Import()
-        {
-            if (!Directory.Exists($"{Directory.GetCurrentDirectory()}/input"))
-            {
-                Program.Logger.info($"The following directory has been not found");
-                Program.Logger.info($"{Directory.GetCurrentDirectory()}/input");
-                Program.Logger.info($"Input directory has been created");
-
-                Directory.CreateDirectory("input");
-            }
-            else
-            {
-                Program.Logger.info($"Directory has been found");
-                Program.Logger.info($"Importing files");
-
-                paths = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/input");
-
-                Program.Logger.info($"Files found: {paths.Length}");
-
-                if (paths.Length != 0)
-                    foreach (string path in paths)
-                        Program.Logger.info($"Imported: {Path.GetFileName(path)}");
-            }
         }
     }
 }

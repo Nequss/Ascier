@@ -70,6 +70,10 @@ namespace Ascier.Screen
                     mode = !mode;
                     Draw(window, mode, fontSize);
                     break;
+
+                case Keyboard.Key.S:
+
+                    break;
             }
         }
 

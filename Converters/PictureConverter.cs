@@ -12,8 +12,7 @@ namespace Ascier.Converters
 {
     public class PictureConverter
     {
-        byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
-
+        private byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
         private Text text = new Text(" ", new Font("font.ttf"));
         private Vector2f position = new Vector2f();
 
