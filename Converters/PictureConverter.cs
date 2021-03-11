@@ -22,14 +22,14 @@ namespace Ascier.Converters
 
             var image = new Image(path);
 
-            for (uint y = fontSize / 2; y < image.Size.Y; y += fontSize)
+            for (uint y = 0; y < image.Size.Y; y += fontSize)
             {
-                for (uint x = fontSize / 2; x < image.Size.X; x += fontSize)
+                for (uint x = 0; x < image.Size.X; x += fontSize)
                 {
-                    var tmpPixel = image.GetPixel((uint) x,(uint) y);
+                    var tmpPixel = image.GetPixel((uint)x, (uint)y);
                     var greyPixel = GetGreyscale(tmpPixel);
 
-                    if(mode) //color mode
+                    if (mode) //color mode
                     {
                         position.X = x;
                         position.Y = y;

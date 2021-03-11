@@ -1,50 +1,51 @@
 using Ascier.Screen;
 using System;
 using System.IO;
+using Ascier.Converters;
 
 namespace Ascier
 {
     public class MyProcessor : CLI_Sharp.CommandProcessor
     {
-        public string[] paths;
-
-        public override void processCommand(string cmd)
-        {
-            switch (cmd)
-            {
-                default:
-                    Preview(cmd);
-                    break;
-            }
-        }
+        public override void processCommand(string cmd) => Preview(cmd);
 
         private void Preview(string cmd)
         {
             string path = FindFile(cmd);
 
-            Program.Logger.info(path);
-
-            if (path != null)
+            if (isVideo(path))
             {
-                Program.Logger.info("File found!");
-                Program.Logger.info("Displaying configurable preview");
-
-                Display display = new Display(path);
-                display.PreviewFrame();
+                Program.Logger.info("Found video!");
+                VideoConverter videoConverter = new VideoConverter(path);
+                videoConverter.Start();
             }
-            else
+            else 
             {
-                Program.Logger.info("File not found!");
+                if (path != null)
+                {
+                    Program.Logger.info("File found!");
+                    Program.Logger.info("Displaying configurable preview");
+
+                    Display display = new Display(path, false);
+                    display.PreviewFrame();
+                }
+                else
+                {
+                    Program.Logger.info("File not found!");
+                }
             }
         }
 
         private string FindFile(string name)
         {
-            foreach (string path in paths)
+            foreach (string path in Directory.GetFiles($"{Directory.GetCurrentDirectory()}/input"))
                 if (name == Path.GetFileName(path) | name == Path.GetFileNameWithoutExtension(path))
                     return path;
 
             return null;
         }
+
+        private bool isVideo(string path)
+            => Path.GetExtension(path) == ".mp4" ? true : false;
     }
 }
