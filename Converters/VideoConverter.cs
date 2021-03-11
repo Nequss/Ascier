@@ -32,8 +32,9 @@ namespace Ascier.Converters
 
             while (!status.IsCompleted);
             Program.Logger.info("Finished splitting video to frames...");
+            
 
-            Program.Logger.info("Dispalying preview");
+            Program.Logger.info("Displaying preview");
             DisplayPreview();
         }
 
