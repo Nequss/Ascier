@@ -24,7 +24,7 @@ namespace Ascier.Screen
         private int lastFrame;
         private string padded = "000";
         private bool isVideo;
-        private int index = 0;
+        private int index = 6;
 
         private Color[] colorArray = {
                         Color.Blue,
