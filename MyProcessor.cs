@@ -11,10 +11,6 @@ namespace Ascier
         { 
             switch(cmd)
             {
-                case "make video":
-                    VideoConverter videoConverter = new VideoConverter();
-                    videoConverter.MakeVideo();
-                    break;
                 default:
                     Preview(cmd);
                     break;

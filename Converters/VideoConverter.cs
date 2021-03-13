@@ -20,12 +20,6 @@ namespace Ascier.Converters
             path = _path;
         }
 
-        public VideoConverter()
-        {
-            FFmpeg.SetExecutablesPath($"{Directory.GetCurrentDirectory()}/ffmpeg");
-            pictureConverter = new PictureConverter();
-        }
-
         public void Start() => RunConversion();
 
         private async Task RunConversion()
