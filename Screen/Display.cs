@@ -23,6 +23,17 @@ namespace Ascier.Screen
         private int frame = 1;
         private string padded = "000";
         private bool isVideo;
+        private int index = 0;
+
+        private Color[] colorArray = {
+                        Color.Blue,
+                        Color.White,
+                        Color.Cyan,
+                        Color.Green,
+                        Color.Magenta,
+                        Color.Red,
+                        Color.Black,
+                        Color.Yellow };
 
         public Display(string _path, bool _isVideo)
         {
@@ -36,7 +47,9 @@ namespace Ascier.Screen
             RenderWindow window = new RenderWindow(new VideoMode((uint)size.X, (uint)size.Y), "ASCII Preview");
             window.SetVisible(true);
             window.SetFramerateLimit(30);
+
             window.Closed += (_, __) => window.Close();
+            window.KeyPressed += Window_KeyPressed;
             window.KeyReleased += Window_KeyReleased;
 
             Draw(window, mode, fontSize);
@@ -47,25 +60,12 @@ namespace Ascier.Screen
             }
         }
 
-        private void Window_KeyReleased(object sender, KeyEventArgs e)
+        private void Window_KeyPressed(object sender, KeyEventArgs e)
         {
             RenderWindow window = (RenderWindow)sender;
 
             switch (e.Code)
             {
-                case Keyboard.Key.P:
-                    if (isVideo)
-                    {
-                        string[] files = Directory.GetFiles(Path.GetDirectoryName(path));
-
-                        foreach (string file in files)
-                        {
-                            path = file;
-                            Draw(window, mode, fontSize);
-                        }
-                    }
-                    break;
-
                 case Keyboard.Key.Up:
                     if (isVideo)
                     {
@@ -91,6 +91,49 @@ namespace Ascier.Screen
                         }
                     }
                     break;
+            }
+        }
+
+        private void Window_KeyReleased(object sender, KeyEventArgs e)
+        {
+            RenderWindow window = (RenderWindow)sender;
+
+            switch (e.Code)
+            {
+                case Keyboard.Key.C:
+                    if (isVideo)
+                    {
+                        if (Directory.Exists($"{Directory.GetCurrentDirectory()}/ascii_temp"))
+                        {
+                            Program.Logger.info("Deleting ascii temp existing files...");
+                            Program.Display.forceRedraw();
+                            Directory.Delete($"{Directory.GetCurrentDirectory()}/ascii_temp", true);
+                        }
+
+                        Directory.CreateDirectory($"{Directory.GetCurrentDirectory()}/ascii_temp");
+
+                        string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/temp");
+
+                        Program.Logger.info($"Frames to convert: {files.Length}");
+
+                        for (int i = 0; i < files.Length; i++)
+                        {
+                            Program.Logger.info($"Converting {i + 1}/{files.Length} frame");
+                            Program.Display.forceRedraw();
+
+                            pictureConverter.DrawPreview(window, mode, files[i], fontSize, colorArray[index]);
+                            window.Display();
+
+                            path = $"{Directory.GetCurrentDirectory()}/ascii_temp/{Path.GetFileName(files[i])}";
+
+                            Texture texture = new Texture((uint)size.X, (uint)size.Y);
+                            texture.Update(window);
+                            texture.CopyToImage().SaveToFile(path);
+                        }
+
+                        window.Close();
+                    }
+                    break;
 
                 case Keyboard.Key.Right:
                     fontSize += 2;
@@ -109,13 +152,39 @@ namespace Ascier.Screen
                     }
                     break;
 
-                case Keyboard.Key.C:
+                case Keyboard.Key.M:
                     mode = !mode;
                     Draw(window, mode, fontSize);
                     break;
 
                 case Keyboard.Key.S:
                     SavePreview(window, path);
+                    break;
+
+                case Keyboard.Key.B:
+
+
+                    for (int i = 0; i < colorArray.Length; i++)
+                    {
+                        if (i == index)
+                        {
+                            index += 1;
+
+                            if (index > colorArray.Length - 1)
+                            {
+                                index = 0;
+                                window.Clear(colorArray[index]);
+                                Draw(window, mode, fontSize);
+                            }
+                            else
+                            {
+                                window.Clear(colorArray[index]);
+                                Draw(window, mode, fontSize);
+                            }
+
+                            break;
+                        }
+                    }
                     break;
             }
         }
@@ -140,7 +209,7 @@ namespace Ascier.Screen
 
         private void Draw(RenderWindow window, bool mode, uint fontSize)
         {
-            pictureConverter.DrawPreview(window, mode, path, fontSize);
+            pictureConverter.DrawPreview(window, mode, path, fontSize, colorArray[index]);
             window.Display();
         }
     }

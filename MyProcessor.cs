@@ -7,7 +7,19 @@ namespace Ascier
 {
     public class MyProcessor : CLI_Sharp.CommandProcessor
     {
-        public override void processCommand(string cmd) => Preview(cmd);
+        public override void processCommand(string cmd)
+        { 
+            switch(cmd)
+            {
+                case "make video":
+                    VideoConverter videoConverter = new VideoConverter();
+                    videoConverter.MakeVideo();
+                    break;
+                default:
+                    Preview(cmd);
+                    break;
+            }
+        }
 
         private void Preview(string cmd)
         {

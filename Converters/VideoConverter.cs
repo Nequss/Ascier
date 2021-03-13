@@ -20,53 +20,74 @@ namespace Ascier.Converters
             path = _path;
         }
 
+        public VideoConverter()
+        {
+            FFmpeg.SetExecutablesPath($"{Directory.GetCurrentDirectory()}/ffmpeg");
+            pictureConverter = new PictureConverter();
+        }
+
         public void Start() => RunConversion();
 
         private async Task RunConversion()
         {
+            if (Directory.Exists($"{Directory.GetCurrentDirectory()}/temp"))
+            {
+                Program.Logger.info("Deleting temp existing files...");
+                Directory.Delete($"{Directory.GetCurrentDirectory()}/temp", true);
+            }
+
+            Directory.CreateDirectory($"{Directory.GetCurrentDirectory()}/temp");
+
             Program.Logger.info("Splitting video to frames...");
             var status = ExtractFrames();
-
             Program.Display.dynamicRefresh = false;
             Program.Display.forceRedraw();
-
             while (!status.IsCompleted);
             Program.Logger.info("Finished splitting video to frames...");
 
-            Program.Logger.info("Dispalying preview");
+            Program.Logger.info("Displaying configurable preview");
+            Program.Display.forceRedraw();
             DisplayPreview();
+
+            Program.Logger.info("Merging frames into a video...");
+            Program.Display.forceRedraw();
+            status = MakeVideo();
+            while (!status.IsCompleted);
+            Program.Logger.info("Completed! Check the output folder for the results");
+            Program.Display.dynamicRefresh = true;
         }
 
         private void DisplayPreview()
         {
-            Program.Logger.info("Displaying configurable preview");
-
             Display display = new Display($"{Directory.GetCurrentDirectory()}/temp/001.png", true);
             display.PreviewFrame();
         }
 
         private async Task ExtractFrames()
         {
-            Func<string, string> outputFileNameBuilder = (number) 
-                => { return $"{Directory.GetCurrentDirectory()}/temp/{number.Trim('_')}.png"; };
+            Func<string, string> outputFileNameBuilder = (number)
+                => { return $"{Directory.GetCurrentDirectory()}/temp/{number.TrimStart('_')}.png"; };
 
             IMediaInfo info = await FFmpeg.GetMediaInfo(path).ConfigureAwait(false);
             IVideoStream videoStream = info.VideoStreams.First()?.SetCodec(VideoCodec.png);
 
             IConversionResult conversionResult = await FFmpeg.Conversions.New()
                 .AddStream(videoStream)
-                .ExtractEveryNthFrame(2, outputFileNameBuilder)
+                .ExtractEveryNthFrame(1, outputFileNameBuilder)
                 .Start();
         }
 
-        private void ConvertFrames()
+        public async Task MakeVideo()
         {
+            string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/ascii_temp");
 
-        }
-
-        private void MakeVideo()
-        {
-
+            await FFmpeg.Conversions.New()
+                .SetInputFrameRate(30)
+                .BuildVideoFromImages(files)
+                .SetFrameRate(30)
+                .SetPixelFormat(PixelFormat.yuv420p)
+                .SetOutput($"{Directory.GetCurrentDirectory()}/output/{Path.GetFileNameWithoutExtension(path)}.mp4")
+                .Start();
         }
     }
 }
