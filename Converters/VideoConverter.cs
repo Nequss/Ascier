@@ -66,7 +66,7 @@ namespace Ascier.Converters
 
             IConversionResult conversionResult = await FFmpeg.Conversions.New()
                 .AddStream(videoStream)
-                .ExtractEveryNthFrame(1, outputFileNameBuilder)
+                .ExtractEveryNthFrame(30, outputFileNameBuilder)
                 .Start();
         }
 

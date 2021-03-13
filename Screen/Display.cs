@@ -21,6 +21,7 @@ namespace Ascier.Screen
         private bool mode = true;
         private uint fontSize = 2;
         private int frame = 1;
+        private int lastFrame;
         private string padded = "000";
         private bool isVideo;
         private int index = 0;
@@ -40,6 +41,16 @@ namespace Ascier.Screen
             path = _path;
             isVideo = _isVideo;
             size = (Vector2i)new Image(path).Size;
+
+            lastFrame = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/temp").Length;
+
+            if (isVideo)
+                if (lastFrame > 999)
+                {
+                    padded = "";
+                    foreach (char c in lastFrame.ToString())
+                        padded += "0";
+                }
         }
 
         public void PreviewFrame()
@@ -69,9 +80,12 @@ namespace Ascier.Screen
                 case Keyboard.Key.Up:
                     if (isVideo)
                     {
-                        frame++;
-                        path = Path.Combine(Path.GetDirectoryName(path), $"{padded.Substring(frame.ToString().Length) + frame}{Path.GetExtension(path)}");
-                        Draw(window, mode, fontSize);
+                        if (frame < lastFrame)
+                        {
+                            frame++;
+                            path = Path.Combine(Path.GetDirectoryName(path), $"{padded.Substring(frame.ToString().Length) + frame}{Path.GetExtension(path)}");
+                            Draw(window, mode, fontSize);
+                        }
                     }
                     break;
 
