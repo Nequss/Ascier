@@ -48,13 +48,6 @@ namespace Ascier.Converters
             Program.Logger.info("Displaying configurable preview");
             Program.Display.forceRedraw();
             DisplayPreview();
-
-            Program.Logger.info("Merging frames into a video...");
-            Program.Display.forceRedraw();
-            status = MakeVideo();
-            while (!status.IsCompleted);
-            Program.Logger.info("Completed! Check the output folder for the results");
-            Program.Display.dynamicRefresh = true;
         }
 
         private void DisplayPreview()
