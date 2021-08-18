@@ -10,8 +10,8 @@ To start the conversion of file, type the file name in CLI.
 
 Possible options during the preview:
 * C - For conversion (video only)
-* ↑ - Goes to another frame (video only)
-* ↓ - goes to previous frame (video only)
+* ↑ - Skips to another frame (video only)
+* ↓ - Skips to previous frame (video only)
 * S - Saves image or single frame during the video real-time preview
 * ← - Increases font size
 * → - Decreases font size
