@@ -133,14 +133,22 @@
                 streaming = false;
                 hideProgress();
                 updateBufferUI();
+                var count = bufferedCount();
                 appendLog({ timestamp: timeNow(), level: 'info',
-                    message: 'stream gotowy: ' + bufferedCount() + '/' + totalFrames + ' klatek' });
+                    message: 'stream gotowy: ' + count + '/' + totalFrames + ' klatek' });
+                if (count < totalFrames && count > 0) {
+                    showToast('stream przerwany: ' + count + '/' + totalFrames + ' klatek', 'warn');
+                } else if (count === 0) {
+                    showToast('stream nie zwrócił żadnych klatek', 'error');
+                }
             },
             error: function (err) {
                 streaming = false;
                 hideProgress();
+                var msg = err.message || String(err);
                 appendLog({ timestamp: timeNow(), level: 'error',
-                    message: 'stream: ' + (err.message || String(err)) });
+                    message: 'stream: ' + msg });
+                showToast('błąd streamu: ' + msg, 'error');
             }
         });
     }
@@ -357,6 +365,7 @@
             })
             .catch(function (e) {
                 appendLog({ timestamp: timeNow(), level: 'error', message: 'seek: ' + e.message });
+                showToast('nie udało się pobrać klatki ' + (idx + 1), 'warn');
             });
     }
 

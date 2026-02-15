@@ -128,7 +128,7 @@ public sealed class VideoService : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = "ffmpeg",
-                Arguments = $"-i \"{session.VideoPath}\" {scaleFilter}-f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
+                Arguments = $"-nostdin -i \"{session.VideoPath}\" {scaleFilter}-f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -141,6 +141,8 @@ public sealed class VideoService : IDisposable
                 process = Process.Start(psi);
                 if (process == null) yield break;
 
+                // drainuj stderr żeby uniknąć deadlocka pipe'a
+                _ = process.StandardError.ReadToEndAsync();
                 var stdout = process.StandardOutput.BaseStream;
                 byte[] buffer = new byte[frameSize];
                 int frameNum = 0;
@@ -248,7 +250,7 @@ public sealed class VideoService : IDisposable
         var psi = new ProcessStartInfo
         {
             FileName = "ffmpeg",
-            Arguments = $"-ss {timeSeconds:F4} -i \"{session.VideoPath}\" " +
+            Arguments = $"-nostdin -ss {timeSeconds:F4} -i \"{session.VideoPath}\" " +
                         $"{scaleFilter}-vframes 1 -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -259,6 +261,8 @@ public sealed class VideoService : IDisposable
         using var process = Process.Start(psi);
         if (process == null) return Array.Empty<byte>();
 
+        // drainuj stderr żeby uniknąć deadlocka pipe'a
+        _ = process.StandardError.ReadToEndAsync();
         byte[] buffer = ArrayPool<byte>.Shared.Rent(expectedSize);
         int totalRead = 0;
 
