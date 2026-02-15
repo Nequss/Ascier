@@ -15,8 +15,14 @@ builder.Services.AddSignalR(options =>
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.Limits.MaxRequestBodySize = 500 * 1024 * 1024;
+    options.Limits.MaxRequestBodySize = 50 * 1024 * 1024;
 });
+
+// limity
+const long MaxVideoSize = 50 * 1024 * 1024;  // 50MB
+const long MaxImageSize = 20 * 1024 * 1024;  // 20MB
+const double MaxVideoDuration = 60.0;         // 60s
+const int MaxVideoResolution = 1280;          // px szerokości
 
 var app = builder.Build();
 
@@ -74,6 +80,9 @@ app.MapPost("/api/convert/image", async (HttpRequest request, ImageService image
     if (!allowedImageExts.Contains(ext))
         return Results.BadRequest("nieobsługiwany format obrazu");
 
+    if (file.Length > MaxImageSize)
+        return Results.BadRequest($"plik za duży ({(file.Length / 1048576.0):F1}MB). limit: {MaxImageSize / 1048576}MB");
+
     var settings = ParseSettings(form);
     var sizeMb = (file.Length / 1048576.0).ToString("F2");
     logs.Info($"konwersja obrazu: {file.FileName} ({sizeMb}MB) efekt={settings.Effect} step={settings.Step}");
@@ -127,6 +136,9 @@ app.MapPost("/api/convert/video", async (HttpRequest request, VideoService video
     if (!allowedVideoExts.Contains(ext))
         return Results.BadRequest("nieobsługiwany format wideo");
 
+    if (file.Length > MaxVideoSize)
+        return Results.BadRequest($"plik za duży ({(file.Length / 1048576.0):F1}MB). limit: {MaxVideoSize / 1048576}MB");
+
     var sizeMb = (file.Length / 1048576.0).ToString("F2");
     logs.Info($"upload wideo: {file.FileName} ({sizeMb}MB)");
 
@@ -135,13 +147,21 @@ app.MapPost("/api/convert/video", async (HttpRequest request, VideoService video
         using var stream = file.OpenReadStream();
         var session = await videoService.CreateSessionAsync(stream, file.FileName);
 
-        logs.Info($"sesja wideo: {session.Id} {session.Width}x{session.Height} {session.Fps:F1}fps {session.Duration:F1}s ({session.TotalFrames} klatek)");
+        if (session.Duration > MaxVideoDuration)
+        {
+            logs.Warn($"wideo za długie: {session.Duration:F1}s (limit: {MaxVideoDuration}s)");
+            return Results.BadRequest($"wideo za długie ({session.Duration:F1}s). limit: {MaxVideoDuration}s");
+        }
+
+        logs.Info($"sesja wideo: {session.Id} {session.Width}x{session.Height} (efektywne: {session.EffectiveWidth}x{session.EffectiveHeight}) {session.Fps:F1}fps {session.Duration:F1}s ({session.TotalFrames} klatek)");
 
         return Results.Ok(new
         {
             sessionId = session.Id,
             width = session.Width,
             height = session.Height,
+            effectiveWidth = session.EffectiveWidth,
+            effectiveHeight = session.EffectiveHeight,
             fps = session.Fps,
             duration = session.Duration,
             totalFrames = session.TotalFrames
@@ -220,6 +240,15 @@ app.MapGet("/api/status", (VideoService videoService) =>
         gcCollections = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) }
     });
 });
+
+// limity dostępne dla frontendu
+app.MapGet("/api/limits", () => Results.Ok(new
+{
+    maxVideoSizeMb = MaxVideoSize / 1048576,
+    maxImageSizeMb = MaxImageSize / 1048576,
+    maxVideoDurationS = MaxVideoDuration,
+    maxVideoResolution = MaxVideoResolution
+}));
 
 app.MapHub<ConversionHub>("/hub/conversion");
 

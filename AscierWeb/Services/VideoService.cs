@@ -16,6 +16,8 @@ public sealed class VideoService : IDisposable
     private readonly ConcurrentDictionary<string, VideoSession> _sessions = new();
     private readonly Timer _cleanupTimer;
 
+    private const int MaxProcessingWidth = 1280;
+
     // metryki wydajności
     private long _totalFramesProcessed;
     private long _totalSessionsCreated;
@@ -46,6 +48,16 @@ public sealed class VideoService : IDisposable
 
         var probeInfo = await ProbeVideoAsync(videoPath);
 
+        // skalowanie - max 1280px szerokości, utrzymanie proporcji
+        int effW = probeInfo.Width;
+        int effH = probeInfo.Height;
+        if (effW > MaxProcessingWidth)
+        {
+            effH = (int)Math.Round((double)probeInfo.Height * MaxProcessingWidth / probeInfo.Width);
+            if (effH % 2 != 0) effH++; // ffmpeg wymaga parzystej wysokości
+            effW = MaxProcessingWidth;
+        }
+
         var session = new VideoSession
         {
             Id = sessionId,
@@ -53,6 +65,8 @@ public sealed class VideoService : IDisposable
             TempDir = sessionDir,
             Width = probeInfo.Width,
             Height = probeInfo.Height,
+            EffectiveWidth = effW,
+            EffectiveHeight = effH,
             Fps = probeInfo.Fps,
             Duration = probeInfo.Duration,
             TotalFrames = probeInfo.TotalFrames,
@@ -75,7 +89,7 @@ public sealed class VideoService : IDisposable
             yield break;
 
         session.LastAccess = DateTime.UtcNow;
-        int frameSize = session.Width * session.Height * 3;
+        int frameSize = session.EffectiveWidth * session.EffectiveHeight * 3;
 
         bool fromCache = File.Exists(Path.Combine(session.TempDir, "frame_000000.rgb"));
 
@@ -99,7 +113,7 @@ public sealed class VideoService : IDisposable
                     Seed = i
                 };
 
-                var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, s);
+                var frame = _imageService.ConvertRaw(rgb24, session.EffectiveWidth, session.EffectiveHeight, s);
                 Interlocked.Increment(ref _totalFramesProcessed);
 
                 yield return frame with { FrameNumber = i, TotalFrames = session.TotalFrames };
@@ -108,10 +122,13 @@ public sealed class VideoService : IDisposable
         else
         {
             // pierwszy stream - ekstrakcja z ffmpeg + cache na dysk + konwersja
+            string scaleFilter = session.EffectiveWidth != session.Width
+                ? $"-vf scale={session.EffectiveWidth}:{session.EffectiveHeight} "
+                : "";
             var psi = new ProcessStartInfo
             {
                 FileName = "ffmpeg",
-                Arguments = $"-i \"{session.VideoPath}\" -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
+                Arguments = $"-i \"{session.VideoPath}\" {scaleFilter}-f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -157,7 +174,7 @@ public sealed class VideoService : IDisposable
                         Seed = frameNum
                     };
 
-                    var frame = _imageService.ConvertRaw(buffer, session.Width, session.Height, s);
+                    var frame = _imageService.ConvertRaw(buffer, session.EffectiveWidth, session.EffectiveHeight, s);
                     Interlocked.Increment(ref _totalFramesProcessed);
 
                     yield return frame with { FrameNumber = frameNum, TotalFrames = session.TotalFrames };
@@ -203,7 +220,7 @@ public sealed class VideoService : IDisposable
         }
 
         settings.Seed = frameNumber;
-        var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, settings);
+        var frame = _imageService.ConvertRaw(rgb24, session.EffectiveWidth, session.EffectiveHeight, settings);
         Interlocked.Increment(ref _totalFramesProcessed);
 
         return frame with
@@ -223,13 +240,16 @@ public sealed class VideoService : IDisposable
     private async Task<byte[]> ExtractSingleFrameAsync(VideoSession session, int frameNumber)
     {
         double timeSeconds = session.Fps > 0 ? frameNumber / session.Fps : 0;
-        int expectedSize = session.Width * session.Height * 3;
+        int expectedSize = session.EffectiveWidth * session.EffectiveHeight * 3;
+        string scaleFilter = session.EffectiveWidth != session.Width
+            ? $"-vf scale={session.EffectiveWidth}:{session.EffectiveHeight} "
+            : "";
 
         var psi = new ProcessStartInfo
         {
             FileName = "ffmpeg",
             Arguments = $"-ss {timeSeconds:F4} -i \"{session.VideoPath}\" " +
-                        $"-vframes 1 -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
+                        $"{scaleFilter}-vframes 1 -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -403,6 +423,8 @@ public sealed class VideoSession
     public string TempDir { get; init; } = "";
     public int Width { get; init; }
     public int Height { get; init; }
+    public int EffectiveWidth { get; init; }
+    public int EffectiveHeight { get; init; }
     public double Fps { get; init; }
     public double Duration { get; init; }
     public int TotalFrames { get; init; }

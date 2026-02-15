@@ -27,6 +27,11 @@
     var logOutput = $('logOutput'), logBadge = $('logBadge');
     var logArrow = $('logArrow'), clearLogs = $('clearLogs');
     var statusText = $('statusText');
+    var toastContainer = $('toastContainer');
+    var limitsInfo = $('limitsInfo');
+
+    // limity (domyślne, pobierane z serwera)
+    var limits = { maxVideoSizeMb: 50, maxImageSizeMb: 20, maxVideoDurationS: 60, maxVideoResolution: 1280 };
 
     // ===== STATE =====
     var file = null;
@@ -57,6 +62,21 @@
     var connection = null;
     var logCount = 0;
     var logOpen = false;
+
+    // ===== TOAST =====
+
+    function showToast(msg, type) {
+        type = type || 'error';
+        var toast = document.createElement('div');
+        toast.className = 'toast toast-' + type;
+        toast.textContent = msg;
+        toastContainer.appendChild(toast);
+        setTimeout(function () { toast.classList.add('toast-visible'); }, 10);
+        setTimeout(function () {
+            toast.classList.remove('toast-visible');
+            setTimeout(function () { toast.remove(); }, 300);
+        }, 5000);
+    }
 
     // ===== SIGNALR =====
 
@@ -408,8 +428,11 @@
 
             frameSlider.max = totalFrames - 1;
             frameSlider.value = 0;
-            videoMeta.textContent = data.width + 'x' + data.height + ' | ' +
-                (fps | 0) + 'fps | ' +
+            videoMeta.textContent = data.width + 'x' + data.height +
+                (data.effectiveWidth && data.effectiveWidth !== data.width
+                    ? ' \u2192 ' + data.effectiveWidth + 'x' + data.effectiveHeight
+                    : '') +
+                ' | ' + (fps | 0) + 'fps | ' +
                 data.duration.toFixed(1) + 's | ' +
                 totalFrames + ' klatek';
             videoControls.style.display = 'block';
@@ -456,7 +479,10 @@
                     try { resolve(JSON.parse(xhr.responseText)); }
                     catch (e) { reject(new Error('json parse')); }
                 } else {
-                    reject(new Error(xhr.responseText || 'HTTP ' + xhr.status));
+                    var msg = xhr.responseText || 'HTTP ' + xhr.status;
+                    // serwer zwraca plain text w BadRequest
+                    showToast(msg, 'error');
+                    reject(new Error(msg));
                 }
             });
             xhr.addEventListener('error', function () { reject(new Error('network')); });
@@ -569,6 +595,16 @@
         isVideo = 'mp4 avi mkv webm mov flv wmv'.split(' ').indexOf(ext) !== -1;
         var mb = (file.size / 1048576).toFixed(2);
         fileInfo.textContent = file.name + ' (' + mb + 'MB)' + (isVideo ? ' \uD83C\uDFAC' : ' \uD83D\uDDBC\uFE0F');
+
+        // walidacja rozmiaru
+        var maxMb = isVideo ? limits.maxVideoSizeMb : limits.maxImageSizeMb;
+        if (file.size > maxMb * 1048576) {
+            showToast('plik za duży (' + mb + 'MB). limit: ' + maxMb + 'MB', 'error');
+            fileInfo.textContent += ' ⛔ za duży!';
+            convertBtn.disabled = true;
+            file = null;
+            return;
+        }
 
         cancelStream();
         stopPlayback();
@@ -695,4 +731,11 @@
     initSignalR();
     fetchStatus();
     setInterval(fetchStatus, 5000);
+
+    // pobierz limity z serwera i wyświetl
+    fetch('/api/limits').then(function (r) { return r.json(); }).then(function (l) {
+        limits = l;
+        limitsInfo.textContent = 'limity: wideo ' + l.maxVideoSizeMb + 'MB / ' +
+            l.maxVideoDurationS + 's / ' + l.maxVideoResolution + 'px, obraz ' + l.maxImageSizeMb + 'MB';
+    }).catch(function () {});
 })();
