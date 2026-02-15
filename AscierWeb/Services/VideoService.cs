@@ -2,18 +2,27 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace AscierWeb.Services;
 
 // serwis konwersji wideo na ascii
-// single-pass ekstrakcja wszystkich klatek przez ffmpeg pipe
-// cache klatek na dysku, batch konwersja do ascii
+// real-time streaming: ffmpeg pipe → ascii konwersja → signalr do klienta
+// cache klatek raw rgb24 na dysku dla seekowania i re-stream z innymi ustawieniami
 public sealed class VideoService : IDisposable
 {
     private readonly ImageService _imageService;
     private readonly string _tempRoot;
     private readonly ConcurrentDictionary<string, VideoSession> _sessions = new();
     private readonly Timer _cleanupTimer;
+
+    // metryki wydajności
+    private long _totalFramesProcessed;
+    private long _totalSessionsCreated;
+
+    public long TotalFramesProcessed => Interlocked.Read(ref _totalFramesProcessed);
+    public long TotalSessionsCreated => Interlocked.Read(ref _totalSessionsCreated);
+    public int ActiveSessions => _sessions.Count;
 
     public VideoService(ImageService imageService)
     {
@@ -51,64 +60,123 @@ public sealed class VideoService : IDisposable
         };
 
         _sessions[sessionId] = session;
+        Interlocked.Increment(ref _totalSessionsCreated);
         return session;
     }
 
-    // preload - ekstrakcja WSZYSTKICH klatek w jednym przebiegu ffmpeg
-    // dużo szybsze niż individual seek per frame
-    public async Task<int> PreloadFramesAsync(string sessionId, Action<int, int>? onProgress = null)
+    // streaming klatek - wyciąganie z ffmpeg lub cache, konwersja w locie
+    // cache-aware: pierwszy raz z ffmpeg (cache'uje), kolejne z cache (szybka ścieżka)
+    public async IAsyncEnumerable<AscierWeb.Core.AsciiFrame> StreamFramesAsync(
+        string sessionId,
+        AscierWeb.Core.ConversionSettings settings,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
-            return 0;
+            yield break;
 
         session.LastAccess = DateTime.UtcNow;
         int frameSize = session.Width * session.Height * 3;
 
-        var psi = new ProcessStartInfo
+        bool fromCache = File.Exists(Path.Combine(session.TempDir, "frame_000000.rgb"));
+
+        if (fromCache)
         {
-            FileName = "ffmpeg",
-            Arguments = $"-i \"{session.VideoPath}\" -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = Process.Start(psi);
-        if (process == null) return 0;
-
-        var stdout = process.StandardOutput.BaseStream;
-        byte[] buffer = new byte[frameSize];
-        int extracted = 0;
-
-        while (extracted < session.TotalFrames)
-        {
-            int totalRead = 0;
-            while (totalRead < frameSize)
+            // szybka ścieżka - re-konwersja z cache (zmiana efektu/ustawień)
+            for (int i = 0; i < session.TotalFrames && !ct.IsCancellationRequested; i++)
             {
-                int read = await stdout.ReadAsync(buffer, totalRead, frameSize - totalRead);
-                if (read == 0) goto done;
-                totalRead += read;
-            }
+                string path = Path.Combine(session.TempDir, $"frame_{i:D6}.rgb");
+                if (!File.Exists(path)) break;
 
-            string cachePath = Path.Combine(session.TempDir, $"frame_{extracted:D6}.rgb");
-            if (!File.Exists(cachePath))
-            {
-                await File.WriteAllBytesAsync(cachePath, buffer);
-            }
+                byte[] rgb24 = await File.ReadAllBytesAsync(path, ct);
+                var s = new AscierWeb.Core.ConversionSettings
+                {
+                    Effect = settings.Effect,
+                    Step = settings.Step,
+                    ColorMode = settings.ColorMode,
+                    Threshold = settings.Threshold,
+                    Invert = settings.Invert,
+                    MaxColumns = settings.MaxColumns,
+                    Seed = i
+                };
 
-            extracted++;
-            onProgress?.Invoke(extracted, session.TotalFrames);
+                var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, s);
+                Interlocked.Increment(ref _totalFramesProcessed);
+
+                yield return frame with { FrameNumber = i, TotalFrames = session.TotalFrames };
+            }
         }
+        else
+        {
+            // pierwszy stream - ekstrakcja z ffmpeg + cache na dysk + konwersja
+            var psi = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments = $"-i \"{session.VideoPath}\" -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-        done:
-        await process.WaitForExitAsync();
+            Process? process = null;
+            try
+            {
+                process = Process.Start(psi);
+                if (process == null) yield break;
 
-        session.PreloadedFrames = extracted;
-        return extracted;
+                var stdout = process.StandardOutput.BaseStream;
+                byte[] buffer = new byte[frameSize];
+                int frameNum = 0;
+                bool eof = false;
+
+                while (!ct.IsCancellationRequested && frameNum < session.TotalFrames && !eof)
+                {
+                    int totalRead = 0;
+                    while (totalRead < frameSize)
+                    {
+                        int read = await stdout.ReadAsync(buffer.AsMemory(totalRead, frameSize - totalRead), ct);
+                        if (read == 0) { eof = true; break; }
+                        totalRead += read;
+                    }
+
+                    if (eof || totalRead < frameSize) break;
+
+                    // cache raw rgb24 na dysk dla seekowania
+                    string cachePath = Path.Combine(session.TempDir, $"frame_{frameNum:D6}.rgb");
+                    await File.WriteAllBytesAsync(cachePath, buffer, ct);
+
+                    // konwersja na ascii w locie
+                    var s = new AscierWeb.Core.ConversionSettings
+                    {
+                        Effect = settings.Effect,
+                        Step = settings.Step,
+                        ColorMode = settings.ColorMode,
+                        Threshold = settings.Threshold,
+                        Invert = settings.Invert,
+                        MaxColumns = settings.MaxColumns,
+                        Seed = frameNum
+                    };
+
+                    var frame = _imageService.ConvertRaw(buffer, session.Width, session.Height, s);
+                    Interlocked.Increment(ref _totalFramesProcessed);
+
+                    yield return frame with { FrameNumber = frameNum, TotalFrames = session.TotalFrames };
+
+                    frameNum++;
+                }
+
+                session.PreloadedFrames = frameNum;
+            }
+            finally
+            {
+                if (process != null && !process.HasExited)
+                    try { process.Kill(); } catch { }
+                process?.Dispose();
+            }
+        }
     }
 
-    // konwersja pojedynczej klatki (z cache lub ffmpeg seek jako fallback)
+    // seekowanie - jednorazowa klatka z cache lub ffmpeg seek
     public async Task<AscierWeb.Core.AsciiFrame?> GetFrameAsync(
         string sessionId,
         int frameNumber,
@@ -120,69 +188,29 @@ public sealed class VideoService : IDisposable
         session.LastAccess = DateTime.UtcNow;
         frameNumber = Math.Clamp(frameNumber, 0, session.TotalFrames - 1);
 
-        string frameCachePath = Path.Combine(session.TempDir, $"frame_{frameNumber:D6}.rgb");
+        string cachePath = Path.Combine(session.TempDir, $"frame_{frameNumber:D6}.rgb");
         byte[] rgb24;
 
-        if (File.Exists(frameCachePath))
+        if (File.Exists(cachePath))
         {
-            rgb24 = await File.ReadAllBytesAsync(frameCachePath);
+            rgb24 = await File.ReadAllBytesAsync(cachePath);
         }
         else
         {
             rgb24 = await ExtractSingleFrameAsync(session, frameNumber);
             if (rgb24.Length == 0) return null;
-            await File.WriteAllBytesAsync(frameCachePath, rgb24);
+            await File.WriteAllBytesAsync(cachePath, rgb24);
         }
 
         settings.Seed = frameNumber;
         var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, settings);
+        Interlocked.Increment(ref _totalFramesProcessed);
+
         return frame with
         {
             FrameNumber = frameNumber,
             TotalFrames = session.TotalFrames
         };
-    }
-
-    // batch konwersja wielu klatek naraz - zwraca tablicę
-    public async Task<List<AscierWeb.Core.AsciiFrame>> GetFrameBatchAsync(
-        string sessionId,
-        int startFrame,
-        int count,
-        AscierWeb.Core.ConversionSettings settings)
-    {
-        if (!_sessions.TryGetValue(sessionId, out var session))
-            return new List<AscierWeb.Core.AsciiFrame>();
-
-        session.LastAccess = DateTime.UtcNow;
-        var results = new List<AscierWeb.Core.AsciiFrame>();
-        int end = Math.Min(startFrame + count, session.TotalFrames);
-
-        for (int i = startFrame; i < end; i++)
-        {
-            string cachePath = Path.Combine(session.TempDir, $"frame_{i:D6}.rgb");
-            if (!File.Exists(cachePath)) break;
-
-            byte[] rgb24 = await File.ReadAllBytesAsync(cachePath);
-            var s = new AscierWeb.Core.ConversionSettings
-            {
-                Effect = settings.Effect,
-                Step = settings.Step,
-                ColorMode = settings.ColorMode,
-                Threshold = settings.Threshold,
-                Invert = settings.Invert,
-                MaxColumns = settings.MaxColumns,
-                Seed = i
-            };
-
-            var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, s);
-            results.Add(frame with
-            {
-                FrameNumber = i,
-                TotalFrames = session.TotalFrames
-            });
-        }
-
-        return results;
     }
 
     public VideoSession? GetSession(string sessionId)
@@ -191,7 +219,7 @@ public sealed class VideoService : IDisposable
         return session;
     }
 
-    // fallback - ekstrakcja jednej klatki z seek (wolne, używane tylko gdy brak cache)
+    // fallback seek - wolne, używane tylko gdy brak cache
     private async Task<byte[]> ExtractSingleFrameAsync(VideoSession session, int frameNumber)
     {
         double timeSeconds = session.Fps > 0 ? frameNumber / session.Fps : 0;

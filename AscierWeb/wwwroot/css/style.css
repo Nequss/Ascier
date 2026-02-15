@@ -184,6 +184,20 @@ input[type="range"]::-moz-range-thumb {
     white-space: pre-wrap;
 }
 
+/* status panel */
+.status-panel {
+    border-top: 1px solid var(--border);
+    padding-top: 0.3rem;
+}
+
+.status-text {
+    font-size: 0.45rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    font-family: 'Courier New', monospace;
+}
+
 /* progress */
 .progress-bar {
     width: 100%;

@@ -1,9 +1,10 @@
 using Microsoft.AspNetCore.SignalR;
 using AscierWeb.Core;
+using System.Runtime.CompilerServices;
 
 namespace AscierWeb.Services;
 
-// hub signalr - ramki ascii + logi w czasie rzeczywistym
+// hub signalr - streaming klatek ascii w czasie rzeczywistym + logi
 public sealed class ConversionHub : Hub
 {
     private readonly ImageService _imageService;
@@ -22,7 +23,6 @@ public sealed class ConversionHub : Hub
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, "logs");
 
-        // wyślij ostatnie logi do nowego subskrybenta
         var recent = _logService.GetRecent(50);
         foreach (var entry in recent)
         {
@@ -35,31 +35,46 @@ public sealed class ConversionHub : Hub
         }
     }
 
-    // przetwarzanie klatki wideo
-    public async Task RequestFrame(string sessionId, int frameNumber, ConversionSettings settings)
+    // streaming klatek wideo - real-time IAsyncEnumerable
+    // klient odbiera klatki w miarę jak są wyciągane/konwertowane
+    public async IAsyncEnumerable<object> StreamVideo(
+        string sessionId,
+        string effect,
+        int step,
+        bool colorMode,
+        int threshold,
+        bool invert,
+        int maxColumns,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var frame = await _videoService.GetFrameAsync(sessionId, frameNumber, settings);
-
-        if (frame != null)
+        var settings = new ConversionSettings
         {
-            string? colorsBase64 = frame.ColorRgb != null
-                ? Convert.ToBase64String(frame.ColorRgb)
-                : null;
+            Effect = effect,
+            Step = Math.Clamp(step, 1, 64),
+            ColorMode = colorMode,
+            Threshold = Math.Clamp(threshold, 0, 255),
+            Invert = invert,
+            MaxColumns = Math.Clamp(maxColumns, 10, 500)
+        };
 
-            await Clients.Caller.SendAsync("ReceiveFrame", new
+        _logService.Info($"stream start: sesja={sessionId} efekt={effect} step={settings.Step} kolor={colorMode}");
+
+        int count = 0;
+        await foreach (var frame in _videoService.StreamFramesAsync(sessionId, settings, cancellationToken))
+        {
+            yield return new
             {
                 text = frame.Text,
                 columns = frame.Columns,
                 rows = frame.Rows,
-                colors = colorsBase64,
+                colors = frame.ColorRgb != null ? Convert.ToBase64String(frame.ColorRgb) : (string?)null,
                 frameNumber = frame.FrameNumber,
                 totalFrames = frame.TotalFrames
-            });
+            };
+            count++;
         }
-        else
-        {
-            await Clients.Caller.SendAsync("Error", "nie udało się przetworzyć klatki");
-        }
+
+        _logService.Info($"stream done: sesja={sessionId} klatek={count}");
     }
 
     public async Task GetEffects()

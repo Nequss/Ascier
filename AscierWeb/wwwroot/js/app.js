@@ -1,9 +1,9 @@
-// ascier web - video player z preload, batch i buforowaniem klatek
-
+// ascier web - real-time ascii video streaming
+// signalr streaming + bufor klatek + raf playback
 (function () {
     'use strict';
 
-    // dom refs
+    // ===== DOM =====
     var $ = function (id) { return document.getElementById(id); };
     var fileInput = $('fileInput');
     var effectSelect = $('effectSelect');
@@ -26,31 +26,461 @@
     var logToggle = $('logToggle'), logBody = $('logBody');
     var logOutput = $('logOutput'), logBadge = $('logBadge');
     var logArrow = $('logArrow'), clearLogs = $('clearLogs');
+    var statusText = $('statusText');
 
-    // state
-    var currentFile = null;
+    // ===== STATE =====
+    var file = null;
     var isVideo = false;
-    var videoSessionId = null;
-    var currentFrame = 0;
+    var sessionId = null;
     var totalFrames = 0;
-    var videoFps = 30;
-    var isPlaying = false;
-    var playRafId = null;
-    var lastAsciiText = '';
+    var fps = 30;
+    var currentFrame = 0;
+    var playing = false;
+    var streaming = false;
+    var converting = false;
+    var speed = 1.0;
+    var lastAscii = '';
+
+    // bufor klatek
+    var frameBuffer = [];
+    var lastRenderedIdx = -1;
+
+    // signalr stream subscription
+    var streamSub = null;
+
+    // playback RAF
+    var rafId = null;
+    var lastTickTime = 0;
+    var playAccum = 0;
+
+    // signalr connection
     var connection = null;
     var logCount = 0;
     var logOpen = false;
-    var converting = false;
-    var preloaded = false;
-    var playSpeed = 1.0;
 
-    // bufor klatek - tablica ascii text + colors dla każdej klatki
-    var frameBuffer = [];
-    var bufferBatchSize = 30;
-    var bufferingFrom = -1;
-    var bufferingPromise = null;
+    // ===== SIGNALR =====
 
-    // -- progress --
+    function initSignalR() {
+        connection = new signalR.HubConnectionBuilder()
+            .withUrl('/hub/conversion')
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on('NewLog', appendLog);
+        connection.on('Error', function (m) {
+            appendLog({ timestamp: timeNow(), level: 'error', message: m });
+        });
+
+        connection.start().then(function () {
+            connection.invoke('SubscribeLogs').catch(function () {});
+        }).catch(function (err) {
+            appendLog({ timestamp: timeNow(), level: 'warn', message: 'signalr: ' + err.message });
+        });
+    }
+
+    // ===== STREAMING =====
+
+    function startStream() {
+        if (!sessionId || !connection || connection.state !== 'Connected') return;
+
+        cancelStream();
+        streaming = true;
+        frameBuffer = new Array(totalFrames);
+        lastRenderedIdx = -1;
+
+        var s = getSettings();
+
+        streamSub = connection.stream('StreamVideo',
+            sessionId, s.effect, s.step, s.colorMode,
+            s.threshold, s.invert, s.maxColumns
+        ).subscribe({
+            next: function (frame) {
+                storeFrame(frame);
+
+                // wyświetl pierwszą klatkę automatycznie
+                if (frame.frameNumber === 0 && !playing) {
+                    renderFrame(0);
+                    updateStats(frame);
+                }
+
+                // progress
+                var done = frame.frameNumber + 1;
+                var pct = (done / frame.totalFrames * 100) | 0;
+                showProgress('streaming ' + done + '/' + frame.totalFrames + ' (' + pct + '%)', pct);
+                updateBufferUI();
+            },
+            complete: function () {
+                streaming = false;
+                hideProgress();
+                updateBufferUI();
+                appendLog({ timestamp: timeNow(), level: 'info',
+                    message: 'stream gotowy: ' + bufferedCount() + '/' + totalFrames + ' klatek' });
+            },
+            error: function (err) {
+                streaming = false;
+                hideProgress();
+                appendLog({ timestamp: timeNow(), level: 'error',
+                    message: 'stream: ' + (err.message || String(err)) });
+            }
+        });
+    }
+
+    function cancelStream() {
+        if (streamSub) {
+            streamSub.dispose();
+            streamSub = null;
+        }
+        streaming = false;
+    }
+
+    function storeFrame(frame) {
+        var entry = {
+            text: frame.text,
+            columns: frame.columns,
+            rows: frame.rows,
+            frameNumber: frame.frameNumber,
+            totalFrames: frame.totalFrames,
+            hasColors: !!frame.colors,
+            html: null
+        };
+
+        // pre-build HTML dla trybu kolorowego (bit operacje na indeksach)
+        if (frame.colors) {
+            entry.html = buildColorHtml(frame.text, frame.colors);
+        }
+
+        frameBuffer[frame.frameNumber] = entry;
+    }
+
+    // ===== RENDERING =====
+
+    // budowanie html z kolorami - operacje na uint8array
+    function buildColorHtml(text, colorsB64) {
+        var bin = atob(colorsB64);
+        var len = bin.length;
+        var colors = new Uint8Array(len);
+        for (var i = 0; i < len; i++) colors[i] = bin.charCodeAt(i);
+
+        var lines = text.split('\n');
+        // pre-alokuj tablicę wynikową
+        var parts = [];
+        var ci = 0;
+
+        for (var y = 0; y < lines.length; y++) {
+            var line = lines[y];
+            if (!line.length) continue;
+            for (var x = 0; x < line.length; x++) {
+                // optymalizacja: indeks koloru = ci * 3 -> (ci << 1) + ci
+                var idx = (ci << 1) + ci;
+                var ch = line.charCodeAt(x);
+                // inline html escape z operacjami bitowymi
+                var esc;
+                if (ch === 38) esc = '&amp;';
+                else if (ch === 60) esc = '&lt;';
+                else if (ch === 62) esc = '&gt;';
+                else esc = line[x];
+
+                parts.push('<span style="color:rgb(');
+                parts.push(colors[idx] | 0);
+                parts.push(',');
+                parts.push(colors[idx + 1] | 0);
+                parts.push(',');
+                parts.push(colors[idx + 2] | 0);
+                parts.push(')">');
+                parts.push(esc);
+                parts.push('</span>');
+                ci++;
+            }
+            parts.push('\n');
+        }
+
+        return parts.join('');
+    }
+
+    // render klatki z bufora (unika redundantnych DOM updates)
+    function renderFrame(idx) {
+        if (idx === lastRenderedIdx) return;
+        var f = frameBuffer[idx];
+        if (!f) return;
+
+        lastRenderedIdx = idx;
+        placeholder.style.display = 'none';
+        asciiOutput.style.display = 'block';
+
+        if (f.html) {
+            asciiOutput.innerHTML = f.html;
+        } else {
+            // monochromatyczny - textContent = zero DOM overhead
+            asciiOutput.textContent = f.text;
+        }
+
+        lastAscii = f.text;
+        currentFrame = idx;
+        downloadBtn.disabled = false;
+    }
+
+    // render z danych serwera (obraz lub seek frame)
+    function renderServerFrame(data) {
+        placeholder.style.display = 'none';
+        asciiOutput.style.display = 'block';
+
+        if (data.colors) {
+            asciiOutput.innerHTML = buildColorHtml(data.text, data.colors);
+        } else {
+            asciiOutput.textContent = data.text;
+        }
+
+        lastAscii = data.text;
+        downloadBtn.disabled = false;
+    }
+
+    // ===== PLAYBACK =====
+
+    function startPlayback() {
+        if (playing || totalFrames < 2) return;
+        if (currentFrame >= totalFrames - 1) currentFrame = 0;
+
+        playing = true;
+        playBtn.textContent = '\u23F8';
+        playBtn.classList.add('playing');
+
+        lastTickTime = performance.now();
+        playAccum = 0;
+        rafId = requestAnimationFrame(playTick);
+    }
+
+    function stopPlayback() {
+        playing = false;
+        playBtn.textContent = '\u25B6';
+        playBtn.classList.remove('playing');
+        if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+        }
+    }
+
+    function playTick(now) {
+        if (!playing) return;
+
+        var delta = now - lastTickTime;
+        lastTickTime = now;
+        playAccum += delta;
+
+        var frameTime = 1000 / (fps * speed);
+        var advanced = false;
+
+        // obsługuj wiele klatek na tick (szybki playback / wolny komputer)
+        while (playAccum >= frameTime) {
+            playAccum -= frameTime;
+
+            var next = currentFrame + 1;
+            if (next >= totalFrames) {
+                stopPlayback();
+                updateFrameUI();
+                return;
+            }
+
+            if (frameBuffer[next]) {
+                currentFrame = next;
+                advanced = true;
+            } else {
+                // buffer underrun - czekaj na więcej klatek
+                playAccum = 0;
+                break;
+            }
+        }
+
+        if (advanced) {
+            renderFrame(currentFrame);
+            updateFrameUI();
+        }
+
+        rafId = requestAnimationFrame(playTick);
+    }
+
+    function showFrame(idx) {
+        idx = Math.max(0, Math.min(idx, totalFrames - 1));
+        currentFrame = idx;
+
+        if (frameBuffer[idx]) {
+            renderFrame(idx);
+        } else {
+            // fallback - pobierz z serwera
+            fetchSingleFrame(idx);
+        }
+        updateFrameUI();
+    }
+
+    // fallback seek - pobierz jedną klatkę z /api/convert/frame
+    function fetchSingleFrame(idx) {
+        var s = getSettings();
+        var fd = new FormData();
+        fd.append('sessionId', sessionId);
+        fd.append('frameNumber', idx);
+        fd.append('effect', s.effect);
+        fd.append('step', s.step);
+        fd.append('colorMode', s.colorMode);
+        fd.append('threshold', s.threshold);
+        fd.append('invert', s.invert);
+        fd.append('maxColumns', s.maxColumns);
+
+        fetch('/api/convert/frame', { method: 'POST', body: fd })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function (data) {
+                renderServerFrame(data);
+                currentFrame = data.frameNumber;
+                updateFrameUI();
+                updateStats(data);
+            })
+            .catch(function (e) {
+                appendLog({ timestamp: timeNow(), level: 'error', message: 'seek: ' + e.message });
+            });
+    }
+
+    // ===== IMAGE =====
+
+    function convertImage() {
+        if (!file || converting) return;
+        converting = true;
+        convertBtn.disabled = true;
+        convertBtn.textContent = '...';
+        showProgress('upload...', 0);
+
+        var s = getSettings();
+        var fd = new FormData();
+        fd.append('file', file);
+        fd.append('effect', s.effect);
+        fd.append('step', s.step);
+        fd.append('colorMode', s.colorMode);
+        fd.append('threshold', s.threshold);
+        fd.append('invert', s.invert);
+        fd.append('maxColumns', s.maxColumns);
+
+        var t0 = performance.now();
+
+        uploadXHR('/api/convert/image', fd, function (pct) {
+            showProgress('upload ' + ((pct * 100) | 0) + '%', pct * 100);
+            if (pct >= 1) showProgress('konwersja...', -1);
+        }).then(function (data) {
+            hideProgress();
+            renderServerFrame(data);
+            updateStats(data, performance.now() - t0);
+        }).catch(function (e) {
+            hideProgress();
+            appendLog({ timestamp: timeNow(), level: 'error', message: 'obraz: ' + e.message });
+        }).finally(function () {
+            converting = false;
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'konwertuj';
+        });
+    }
+
+    // ===== VIDEO UPLOAD =====
+
+    function uploadVideo() {
+        if (!file || converting) return;
+        converting = true;
+        convertBtn.disabled = true;
+        convertBtn.textContent = '...';
+        showProgress('upload wideo...', 0);
+
+        var s = getSettings();
+        var fd = new FormData();
+        fd.append('file', file);
+        fd.append('effect', s.effect);
+        fd.append('step', s.step);
+        fd.append('colorMode', s.colorMode);
+        fd.append('threshold', s.threshold);
+        fd.append('invert', s.invert);
+        fd.append('maxColumns', s.maxColumns);
+
+        uploadXHR('/api/convert/video', fd, function (pct) {
+            showProgress('upload ' + ((pct * 100) | 0) + '%', pct * 100);
+            if (pct >= 1) showProgress('analiza...', -1);
+        }).then(function (data) {
+            sessionId = data.sessionId;
+            totalFrames = data.totalFrames;
+            fps = data.fps || 30;
+            currentFrame = 0;
+
+            frameSlider.max = totalFrames - 1;
+            frameSlider.value = 0;
+            videoMeta.textContent = data.width + 'x' + data.height + ' | ' +
+                (fps | 0) + 'fps | ' +
+                data.duration.toFixed(1) + 's | ' +
+                totalFrames + ' klatek';
+            videoControls.style.display = 'block';
+            updateFrameUI();
+
+            converting = false;
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'konwertuj';
+
+            // start real-time streaming klatek ascii
+            showProgress('streaming...', 0);
+            startStream();
+        }).catch(function (e) {
+            hideProgress();
+            appendLog({ timestamp: timeNow(), level: 'error', message: 'wideo: ' + e.message });
+            converting = false;
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'konwertuj';
+        });
+    }
+
+    // ===== HELPERS =====
+
+    function getSettings() {
+        return {
+            effect: effectSelect.value,
+            step: parseInt(stepRange.value) | 0,
+            colorMode: colorMode.checked,
+            threshold: parseInt(thresholdRange.value) | 0,
+            invert: invertMode.checked,
+            maxColumns: parseInt(maxColsRange.value) | 0
+        };
+    }
+
+    function uploadXHR(url, fd, onProgress) {
+        return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            xhr.upload.addEventListener('progress', function (e) {
+                if (e.lengthComputable) onProgress(e.loaded / e.total);
+            });
+            xhr.addEventListener('load', function () {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch (e) { reject(new Error('json parse')); }
+                } else {
+                    reject(new Error(xhr.responseText || 'HTTP ' + xhr.status));
+                }
+            });
+            xhr.addEventListener('error', function () { reject(new Error('network')); });
+            xhr.send(fd);
+        });
+    }
+
+    function bufferedCount() {
+        var c = 0;
+        for (var i = 0; i < frameBuffer.length; i++) {
+            if (frameBuffer[i]) c++;
+        }
+        return c;
+    }
+
+    function timeNow() {
+        var d = new Date();
+        return String(d.getHours()).padStart(2, '0') + ':' +
+               String(d.getMinutes()).padStart(2, '0') + ':' +
+               String(d.getSeconds()).padStart(2, '0') + '.' +
+               String(d.getMilliseconds()).padStart(3, '0');
+    }
+
+    // ===== UI =====
 
     function showProgress(label, pct) {
         progressGroup.style.display = 'block';
@@ -69,33 +499,26 @@
         progressFill.classList.remove('indeterminate');
     }
 
-    // -- signalr --
-
-    function initSignalR() {
-        connection = new signalR.HubConnectionBuilder()
-            .withUrl('/hub/conversion')
-            .withAutomaticReconnect()
-            .build();
-
-        connection.on('NewLog', function (e) { appendLog(e); });
-        connection.on('ReceiveFrame', function (d) { renderText(d); updateStats(d); });
-        connection.on('Error', function (m) { appendLog({ timestamp: timeNow(), level: 'error', message: m }); });
-
-        connection.start().then(function () {
-            connection.invoke('SubscribeLogs').catch(function () {});
-        }).catch(function (err) {
-            appendLog({ timestamp: timeNow(), level: 'warn', message: 'signalr: ' + err.message });
-        });
+    function updateFrameUI() {
+        frameSlider.value = currentFrame;
+        frameInfo.textContent = (currentFrame + 1) + '/' + totalFrames;
     }
 
-    function timeNow() {
-        var d = new Date();
-        return [d.getHours(), d.getMinutes(), d.getSeconds()].map(function (n) {
-            return String(n).padStart(2, '0');
-        }).join(':') + '.' + String(d.getMilliseconds()).padStart(3, '0');
+    function updateBufferUI() {
+        var count = bufferedCount();
+        bufferInfoEl.textContent = 'bufor: ' + count + '/' + totalFrames + ' klatek';
     }
 
-    // -- logs --
+    function updateStats(data, ms) {
+        var cols = data.columns | 0;
+        var rows = data.rows | 0;
+        var t = cols + '\u00D7' + rows + ' = ' + (cols * rows).toLocaleString() + ' znak\u00F3w';
+        t += '\nefekt: ' + effectSelect.value;
+        if (data.colors || data.hasColors) t += ' [kolor]';
+        if (ms) t += '\nczas: ' + (ms | 0) + 'ms';
+        if (data.totalFrames > 1) t += '\nklatka: ' + ((data.frameNumber | 0) + 1) + '/' + data.totalFrames;
+        statsText.textContent = t;
+    }
 
     function appendLog(entry) {
         var span = document.createElement('span');
@@ -108,450 +531,9 @@
         if (entry.level === 'error') logBadge.classList.add('error');
     }
 
-    // -- settings --
-
-    function getSettings() {
-        return {
-            effect: effectSelect.value,
-            step: parseInt(stepRange.value),
-            colorMode: colorMode.checked,
-            threshold: parseInt(thresholdRange.value),
-            invert: invertMode.checked,
-            maxColumns: parseInt(maxColsRange.value)
-        };
-    }
-
-    function buildFormData(file, settings, extra) {
-        var fd = new FormData();
-        if (file) fd.append('file', file);
-        fd.append('effect', settings.effect);
-        fd.append('step', settings.step);
-        fd.append('colorMode', settings.colorMode);
-        fd.append('threshold', settings.threshold);
-        fd.append('invert', settings.invert);
-        fd.append('maxColumns', settings.maxColumns);
-        if (extra) {
-            Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
-        }
-        return fd;
-    }
-
-    // -- upload with XHR progress --
-
-    function uploadXHR(url, fd, onProgress) {
-        return new Promise(function (resolve, reject) {
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', url);
-            xhr.upload.addEventListener('progress', function (e) {
-                if (e.lengthComputable) onProgress(e.loaded / e.total);
-            });
-            xhr.addEventListener('load', function () {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    try { resolve(JSON.parse(xhr.responseText)); }
-                    catch (e) { reject(new Error('json parse error')); }
-                } else {
-                    reject(new Error(xhr.responseText || 'HTTP ' + xhr.status));
-                }
-            });
-            xhr.addEventListener('error', function () { reject(new Error('network error')); });
-            xhr.send(fd);
-        });
-    }
-
-    // -- html escape --
-
-    function esc(ch) {
-        if (ch === '&') return '&amp;';
-        if (ch === '<') return '&lt;';
-        if (ch === '>') return '&gt;';
-        return ch;
-    }
-
-    // -- render ascii text --
-
-    function renderText(data) {
-        if (!data || !data.text) return;
-        placeholder.style.display = 'none';
-        asciiOutput.style.display = 'block';
-
-        if (data.colors) {
-            var binary = atob(data.colors);
-            var colors = new Uint8Array(binary.length);
-            for (var i = 0; i < binary.length; i++) colors[i] = binary.charCodeAt(i);
-
-            var lines = data.text.split('\n');
-            var parts = [];
-            var ci = 0;
-
-            for (var y = 0; y < lines.length; y++) {
-                var line = lines[y];
-                if (!line.length) continue;
-                for (var x = 0; x < line.length; x++) {
-                    var idx = ci * 3;
-                    parts.push('<span style="color:rgb(' +
-                        (colors[idx] || 0) + ',' + (colors[idx + 1] || 0) + ',' + (colors[idx + 2] || 0) +
-                        ')">' + esc(line[x]) + '</span>');
-                    ci++;
-                }
-                parts.push('\n');
-            }
-            asciiOutput.innerHTML = parts.join('');
-        } else {
-            asciiOutput.textContent = data.text;
-        }
-
-        lastAsciiText = data.text;
-        downloadBtn.disabled = false;
-    }
-
-    // render from buffer (no DOM rebuild for plain text)
-    function renderBufferedFrame(idx) {
-        var f = frameBuffer[idx];
-        if (!f) return;
-        placeholder.style.display = 'none';
-        asciiOutput.style.display = 'block';
-
-        if (f.html) {
-            asciiOutput.innerHTML = f.html;
-        } else {
-            asciiOutput.textContent = f.text;
-        }
-
-        lastAsciiText = f.text;
-        downloadBtn.disabled = false;
-    }
-
-    function updateStats(data, ms) {
-        var cols = data.columns || 0;
-        var rows = data.rows || 0;
-        var t = cols + '×' + rows + ' = ' + (cols * rows).toLocaleString() + ' znaków';
-        t += '\nefekt: ' + effectSelect.value;
-        if (data.colors) t += ' [kolor]';
-        if (ms) t += '\nczas: ' + ms.toFixed(0) + 'ms';
-        if (data.totalFrames > 1) t += '\nklatka: ' + ((data.frameNumber || 0) + 1) + '/' + data.totalFrames;
-        statsText.textContent = t;
-    }
-
-    function updateFrameUI() {
-        frameSlider.value = currentFrame;
-        frameInfo.textContent = (currentFrame + 1) + '/' + totalFrames;
-        var buffered = frameBuffer.filter(function (f) { return f !== null && f !== undefined; }).length;
-        bufferInfoEl.textContent = 'bufor: ' + buffered + '/' + totalFrames + ' klatek';
-    }
-
-    // ====== IMAGE ======
-
-    function convertImage() {
-        if (!currentFile || converting) return;
-        converting = true;
-        convertBtn.disabled = true;
-        convertBtn.textContent = '...';
-        showProgress('upload...', 0);
-
-        var settings = getSettings();
-        var fd = buildFormData(currentFile, settings);
-        var start = performance.now();
-
-        uploadXHR('/api/convert/image', fd, function (pct) {
-            showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
-            if (pct >= 1) showProgress('przetwarzam...', -1);
-        }).then(function (data) {
-            hideProgress();
-            renderText(data);
-            updateStats(data, performance.now() - start);
-        }).catch(function (e) {
-            hideProgress();
-            appendLog({ timestamp: timeNow(), level: 'error', message: 'konwersja: ' + e.message });
-        }).finally(function () {
-            converting = false;
-            convertBtn.disabled = false;
-            convertBtn.textContent = 'konwertuj';
-        });
-    }
-
-    // ====== VIDEO ======
-
-    function uploadVideo() {
-        if (!currentFile || converting) return;
-        converting = true;
-        convertBtn.disabled = true;
-        convertBtn.textContent = '...';
-        showProgress('upload wideo...', 0);
-
-        var settings = getSettings();
-        var fd = buildFormData(currentFile, settings);
-
-        uploadXHR('/api/convert/video', fd, function (pct) {
-            showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
-            if (pct >= 1) showProgress('analiza wideo...', -1);
-        }).then(function (data) {
-            videoSessionId = data.sessionId;
-            totalFrames = data.totalFrames;
-            videoFps = data.fps || 30;
-            currentFrame = 0;
-            preloaded = false;
-            frameBuffer = new Array(totalFrames);
-
-            frameSlider.max = totalFrames - 1;
-            frameSlider.value = 0;
-            videoMeta.textContent = data.width + 'x' + data.height + ' | ' +
-                videoFps.toFixed(1) + 'fps | ' +
-                data.duration.toFixed(1) + 's | ' +
-                totalFrames + ' klatek';
-            videoControls.style.display = 'block';
-            updateFrameUI();
-
-            converting = false;
-            convertBtn.disabled = false;
-            convertBtn.textContent = 'konwertuj';
-
-            // rozpocznij preload klatek w tle
-            startPreload();
-        }).catch(function (e) {
-            hideProgress();
-            appendLog({ timestamp: timeNow(), level: 'error', message: 'upload wideo: ' + e.message });
-            converting = false;
-            convertBtn.disabled = false;
-            convertBtn.textContent = 'konwertuj';
-        });
-    }
-
-    // preload raw frames na serwerze (jeden ffmpeg pass)
-    function startPreload() {
-        showProgress('ekstrakcja klatek...', 0);
-
-        var fd = new FormData();
-        fd.append('sessionId', videoSessionId);
-
-        fetch('/api/convert/preload', { method: 'POST', body: fd })
-            .then(function (resp) {
-                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
-                return resp.json();
-            })
-            .then(function (data) {
-                preloaded = true;
-                appendLog({ timestamp: timeNow(), level: 'info', message: 'preload: ' + data.extracted + '/' + data.total + ' klatek' });
-
-                // po preload - załaduj pierwszą klatkę i zacznij buforować
-                showProgress('konwersja ascii...', 0);
-                return bufferFrames(0, Math.min(bufferBatchSize, totalFrames));
-            })
-            .then(function () {
-                hideProgress();
-                if (frameBuffer[0]) {
-                    renderBufferedFrame(0);
-                    updateStats(frameBuffer[0]);
-                }
-                updateFrameUI();
-
-                // kontynuuj buforowanie w tle
-                bufferRemaining(bufferBatchSize);
-            })
-            .catch(function (e) {
-                hideProgress();
-                appendLog({ timestamp: timeNow(), level: 'error', message: 'preload: ' + e.message });
-                // fallback - ładuj klatki na żądanie
-                preloaded = false;
-                loadSingleFrame(0);
-            });
-    }
-
-    // buforuj batch klatek (konwersja ascii na serwerze)
-    function bufferFrames(startFrame, count) {
-        if (bufferingFrom === startFrame) return bufferingPromise;
-
-        var settings = getSettings();
-        var fd = buildFormData(null, settings, {
-            sessionId: videoSessionId,
-            startFrame: startFrame,
-            count: count
-        });
-
-        bufferingFrom = startFrame;
-
-        bufferingPromise = fetch('/api/convert/batch', { method: 'POST', body: fd })
-            .then(function (resp) {
-                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
-                return resp.json();
-            })
-            .then(function (frames) {
-                for (var i = 0; i < frames.length; i++) {
-                    var f = frames[i];
-                    var html = null;
-
-                    if (f.colors) {
-                        var binary = atob(f.colors);
-                        var colors = new Uint8Array(binary.length);
-                        for (var j = 0; j < binary.length; j++) colors[j] = binary.charCodeAt(j);
-
-                        var lines = f.text.split('\n');
-                        var parts = [];
-                        var ci = 0;
-                        for (var y = 0; y < lines.length; y++) {
-                            var line = lines[y];
-                            if (!line.length) continue;
-                            for (var x = 0; x < line.length; x++) {
-                                var idx2 = ci * 3;
-                                parts.push('<span style="color:rgb(' +
-                                    (colors[idx2] || 0) + ',' + (colors[idx2 + 1] || 0) + ',' + (colors[idx2 + 2] || 0) +
-                                    ')">' + esc(line[x]) + '</span>');
-                                ci++;
-                            }
-                            parts.push('\n');
-                        }
-                        html = parts.join('');
-                    }
-
-                    frameBuffer[f.frameNumber] = {
-                        text: f.text,
-                        html: html,
-                        columns: f.columns,
-                        rows: f.rows,
-                        colors: !!f.colors,
-                        frameNumber: f.frameNumber,
-                        totalFrames: f.totalFrames
-                    };
-                }
-
-                var pct = Math.round((startFrame + frames.length) / totalFrames * 100);
-                showProgress('konwersja ascii ' + pct + '%', pct);
-                updateFrameUI();
-
-                bufferingFrom = -1;
-                bufferingPromise = null;
-                return frames.length;
-            })
-            .catch(function (e) {
-                bufferingFrom = -1;
-                bufferingPromise = null;
-                appendLog({ timestamp: timeNow(), level: 'error', message: 'batch: ' + e.message });
-                return 0;
-            });
-
-        return bufferingPromise;
-    }
-
-    // buforuj resztę klatek w tle
-    function bufferRemaining(from) {
-        if (from >= totalFrames) {
-            hideProgress();
-            updateFrameUI();
-            return;
-        }
-
-        var count = Math.min(bufferBatchSize, totalFrames - from);
-        bufferFrames(from, count).then(function (got) {
-            if (got > 0) {
-                setTimeout(function () { bufferRemaining(from + got); }, 10);
-            } else {
-                hideProgress();
-            }
-        });
-    }
-
-    // fallback: ładuj jedną klatkę (bez preload)
-    function loadSingleFrame(frameNumber) {
-        if (!videoSessionId) return Promise.resolve();
-
-        showProgress('klatka ' + (frameNumber + 1) + '/' + totalFrames, -1);
-        var start = performance.now();
-        var settings = getSettings();
-        var fd = buildFormData(null, settings, {
-            sessionId: videoSessionId,
-            frameNumber: frameNumber
-        });
-
-        return fetch('/api/convert/frame', { method: 'POST', body: fd })
-            .then(function (resp) {
-                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
-                return resp.json();
-            })
-            .then(function (data) {
-                currentFrame = data.frameNumber;
-                renderText(data);
-                updateStats(data, performance.now() - start);
-                updateFrameUI();
-                hideProgress();
-            })
-            .catch(function (e) {
-                hideProgress();
-                appendLog({ timestamp: timeNow(), level: 'error', message: 'klatka: ' + e.message });
-            });
-    }
-
-    // -- wyświetl klatkę (z bufora lub fallback) --
-
-    function showFrame(idx) {
-        idx = Math.max(0, Math.min(idx, totalFrames - 1));
-        currentFrame = idx;
-
-        if (frameBuffer[idx]) {
-            renderBufferedFrame(idx);
-            updateStats(frameBuffer[idx]);
-            updateFrameUI();
-        } else {
-            loadSingleFrame(idx);
-        }
-    }
-
-    // ====== PLAYBACK ======
-
-    function startPlayback() {
-        if (isPlaying || !videoSessionId) return;
-        if (currentFrame >= totalFrames - 1) currentFrame = 0;
-
-        isPlaying = true;
-        playBtn.textContent = '⏸';
-        playBtn.classList.add('playing');
-
-        var lastTime = performance.now();
-        var frameInterval = 1000 / (videoFps * playSpeed);
-
-        function tick(now) {
-            if (!isPlaying) return;
-
-            var delta = now - lastTime;
-            if (delta >= frameInterval) {
-                lastTime = now - (delta % frameInterval);
-
-                currentFrame++;
-                if (currentFrame >= totalFrames) {
-                    stopPlayback();
-                    return;
-                }
-
-                if (frameBuffer[currentFrame]) {
-                    renderBufferedFrame(currentFrame);
-                    updateFrameUI();
-                } else {
-                    // nie ma w buforze - czekaj
-                    currentFrame--;
-                    updateFrameUI();
-                }
-            }
-
-            playRafId = requestAnimationFrame(tick);
-        }
-
-        playRafId = requestAnimationFrame(tick);
-    }
-
-    function stopPlayback() {
-        isPlaying = false;
-        playBtn.textContent = '▶ play';
-        playBtn.classList.remove('playing');
-        if (playRafId) {
-            cancelAnimationFrame(playRafId);
-            playRafId = null;
-        }
-        updateFrameUI();
-    }
-
-    // -- download --
-
     function downloadTxt() {
-        if (!lastAsciiText) return;
-        var blob = new Blob([lastAsciiText], { type: 'text/plain;charset=utf-8' });
+        if (!lastAscii) return;
+        var blob = new Blob([lastAscii], { type: 'text/plain;charset=utf-8' });
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
@@ -560,39 +542,41 @@
         URL.revokeObjectURL(url);
     }
 
-    // -- re-buforuj z nowymi ustawieniami --
+    // ===== MONITORING =====
 
-    function rebufferVideo() {
-        if (!videoSessionId || !preloaded) return;
-        // wyczyść bufor
-        frameBuffer = new Array(totalFrames);
-        stopPlayback();
-        showProgress('re-konwersja...', 0);
-        bufferFrames(0, Math.min(bufferBatchSize, totalFrames)).then(function () {
-            if (frameBuffer[currentFrame]) {
-                renderBufferedFrame(currentFrame);
-                updateStats(frameBuffer[currentFrame]);
-            }
-            bufferRemaining(bufferBatchSize);
-        });
+    function fetchStatus() {
+        fetch('/api/status')
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (!statusText) return;
+                statusText.textContent =
+                    'uptime: ' + s.uptime +
+                    '\nmem: ' + s.memoryMb + 'MB (gc: ' + s.gcMemoryMb + 'MB)' +
+                    '\ncpu: ' + s.cpuSeconds + 's | thr: ' + s.threads +
+                    '\nsesje: ' + s.activeSessions + ' | klatki: ' + s.totalFrames +
+                    '\ngc: ' + s.gcCollections.join('/');
+            })
+            .catch(function () {});
     }
 
-    // ====== EVENT LISTENERS ======
+    // ===== EVENTS =====
 
     fileInput.addEventListener('change', function (e) {
-        currentFile = e.target.files[0];
-        if (!currentFile) { convertBtn.disabled = true; return; }
+        file = e.target.files[0];
+        if (!file) { convertBtn.disabled = true; return; }
 
-        var ext = currentFile.name.split('.').pop().toLowerCase();
-        isVideo = ['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'wmv'].indexOf(ext) !== -1;
-        var mb = (currentFile.size / 1048576).toFixed(2);
-        fileInfo.textContent = currentFile.name + ' (' + mb + ' MB)' + (isVideo ? ' 🎬' : ' 🖼️');
+        var ext = file.name.split('.').pop().toLowerCase();
+        isVideo = 'mp4 avi mkv webm mov flv wmv'.split(' ').indexOf(ext) !== -1;
+        var mb = (file.size / 1048576).toFixed(2);
+        fileInfo.textContent = file.name + ' (' + mb + 'MB)' + (isVideo ? ' \uD83C\uDFAC' : ' \uD83D\uDDBC\uFE0F');
 
-        videoSessionId = null;
-        videoControls.style.display = 'none';
+        cancelStream();
         stopPlayback();
+        sessionId = null;
+        totalFrames = 0;
         frameBuffer = [];
-        preloaded = false;
+        lastRenderedIdx = -1;
+        videoControls.style.display = 'none';
         convertBtn.disabled = false;
     });
 
@@ -610,20 +594,38 @@
     fontSizeRange.addEventListener('input', function () {
         fontSizeValue.textContent = fontSizeRange.value;
         asciiOutput.style.fontSize = fontSizeRange.value + 'px';
-        asciiOutput.style.lineHeight = Math.round(parseInt(fontSizeRange.value) * 1.1) + 'px';
+        asciiOutput.style.lineHeight = ((parseInt(fontSizeRange.value) * 1.1) | 0) + 'px';
     });
     speedRange.addEventListener('input', function () {
-        playSpeed = parseInt(speedRange.value) / 10;
-        speedValue.textContent = playSpeed.toFixed(1);
+        speed = parseInt(speedRange.value) / 10;
+        speedValue.textContent = speed.toFixed(1);
     });
 
-    // zmiana efektu -> re-buforuj
+    // zmiana efektu -> re-stream dla video, re-konwersja dla obrazu
     effectSelect.addEventListener('change', function () {
-        if (isVideo && videoSessionId && preloaded) {
-            rebufferVideo();
-        } else if (!isVideo && currentFile && lastAsciiText) {
+        if (isVideo && sessionId) {
+            stopPlayback();
+            lastRenderedIdx = -1;
+            frameBuffer = new Array(totalFrames);
+            showProgress('re-konwersja...', 0);
+            startStream();
+        } else if (!isVideo && file && lastAscii) {
             convertImage();
         }
+    });
+
+    // zmiana ustawień konwersji -> re-stream dla video
+    var settingsInputs = [stepRange, maxColsRange, thresholdRange, colorMode, invertMode];
+    settingsInputs.forEach(function (el) {
+        el.addEventListener('change', function () {
+            if (isVideo && sessionId && !streaming) {
+                stopPlayback();
+                lastRenderedIdx = -1;
+                frameBuffer = new Array(totalFrames);
+                showProgress('re-konwersja...', 0);
+                startStream();
+            }
+        });
     });
 
     // video nav
@@ -638,7 +640,7 @@
     });
 
     playBtn.addEventListener('click', function () {
-        if (isPlaying) stopPlayback();
+        if (playing) stopPlayback();
         else startPlayback();
     });
 
@@ -650,15 +652,14 @@
 
     frameSlider.addEventListener('input', function () {
         stopPlayback();
-        currentFrame = parseInt(frameSlider.value);
-        showFrame(currentFrame);
+        showFrame(parseInt(frameSlider.value));
     });
 
     // logi
     logToggle.addEventListener('click', function () {
         logOpen = !logOpen;
         logBody.style.display = logOpen ? 'block' : 'none';
-        logArrow.textContent = logOpen ? '▼' : '▲';
+        logArrow.textContent = logOpen ? '\u25BC' : '\u25B2';
         if (logOpen) logBadge.classList.remove('error');
     });
 
@@ -669,27 +670,29 @@
         logBadge.classList.remove('error');
     });
 
-    // keyboard
+    // klawiatura
     document.addEventListener('keydown', function (e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if (!isVideo || !sessionId) return;
 
-        if (isVideo && videoSessionId) {
-            if (e.key === 'ArrowLeft') {
-                e.preventDefault();
-                stopPlayback();
-                if (currentFrame > 0) showFrame(currentFrame - 1);
-            } else if (e.key === 'ArrowRight') {
-                e.preventDefault();
-                stopPlayback();
-                if (currentFrame < totalFrames - 1) showFrame(currentFrame + 1);
-            } else if (e.key === ' ') {
-                e.preventDefault();
-                if (isPlaying) stopPlayback();
-                else startPlayback();
-            }
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            stopPlayback();
+            if (currentFrame > 0) showFrame(currentFrame - 1);
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            stopPlayback();
+            if (currentFrame < totalFrames - 1) showFrame(currentFrame + 1);
+        } else if (e.key === ' ') {
+            e.preventDefault();
+            if (playing) stopPlayback();
+            else startPlayback();
         }
     });
 
-    // init
+    // ===== INIT =====
+
     initSignalR();
+    fetchStatus();
+    setInterval(fetchStatus, 5000);
 })();

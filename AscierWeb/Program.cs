@@ -10,7 +10,7 @@ builder.Services.AddSingleton<VideoService>();
 
 builder.Services.AddSignalR(options =>
 {
-    options.MaximumReceiveMessageSize = 1024 * 1024;
+    options.MaximumReceiveMessageSize = 2 * 1024 * 1024;
 });
 
 builder.WebHost.ConfigureKestrel(options =>
@@ -203,83 +203,22 @@ app.MapPost("/api/convert/frame", async (HttpRequest request, VideoService video
     }
 });
 
-// preload - ekstrakcja wszystkich klatek w jednym przebiegu ffmpeg
-app.MapPost("/api/convert/preload", async (HttpRequest request, VideoService videoService, LogService logs) =>
+// monitoring - metryki serwera i usage
+app.MapGet("/api/status", (VideoService videoService) =>
 {
-    if (!request.HasFormContentType)
-        return Results.BadRequest("wymagany content-type: multipart/form-data");
-
-    var form = await request.ReadFormAsync();
-    var sessionId = form["sessionId"].FirstOrDefault();
-
-    if (string.IsNullOrEmpty(sessionId))
-        return Results.BadRequest("brak sessionId");
-
-    var session = videoService.GetSession(sessionId);
-    if (session == null)
-        return Results.NotFound("sesja nie znaleziona");
-
-    logs.Info($"preload start: sesja={sessionId} ({session.TotalFrames} klatek)");
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-
-    int extracted = await videoService.PreloadFramesAsync(sessionId, (done, total) =>
+    var proc = System.Diagnostics.Process.GetCurrentProcess();
+    return Results.Ok(new
     {
-        if (done % 10 == 0 || done == total)
-            logs.Info($"preload: {done}/{total} klatek");
+        uptime = (DateTime.UtcNow - proc.StartTime.ToUniversalTime()).ToString(@"d\.hh\:mm\:ss"),
+        activeSessions = videoService.ActiveSessions,
+        totalSessions = videoService.TotalSessionsCreated,
+        totalFrames = videoService.TotalFramesProcessed,
+        memoryMb = Math.Round(proc.WorkingSet64 / 1048576.0, 1),
+        gcMemoryMb = Math.Round(GC.GetTotalMemory(false) / 1048576.0, 1),
+        cpuSeconds = Math.Round(proc.TotalProcessorTime.TotalSeconds, 1),
+        threads = proc.Threads.Count,
+        gcCollections = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) }
     });
-
-    sw.Stop();
-    logs.Info($"preload done: {extracted} klatek w {sw.ElapsedMilliseconds}ms");
-
-    return Results.Ok(new { extracted, total = session.TotalFrames });
-});
-
-// batch - konwersja wielu klatek naraz (z cache)
-app.MapPost("/api/convert/batch", async (HttpRequest request, VideoService videoService, LogService logs) =>
-{
-    if (!request.HasFormContentType)
-        return Results.BadRequest("wymagany content-type: multipart/form-data");
-
-    var form = await request.ReadFormAsync();
-    var sessionId = form["sessionId"].FirstOrDefault();
-    var startStr = form["startFrame"].FirstOrDefault();
-    var countStr = form["count"].FirstOrDefault();
-
-    if (string.IsNullOrEmpty(sessionId))
-        return Results.BadRequest("brak sessionId");
-
-    int startFrame = 0;
-    if (!string.IsNullOrEmpty(startStr))
-        int.TryParse(startStr, out startFrame);
-
-    int count = 30;
-    if (!string.IsNullOrEmpty(countStr))
-        int.TryParse(countStr, out count);
-
-    count = Math.Clamp(count, 1, 120);
-    var settings = ParseSettings(form);
-
-    try
-    {
-        var frames = await videoService.GetFrameBatchAsync(sessionId, startFrame, count, settings);
-
-        var result = frames.Select(f => new
-        {
-            text = f.Text,
-            columns = f.Columns,
-            rows = f.Rows,
-            colors = f.ColorRgb != null ? Convert.ToBase64String(f.ColorRgb) : (string?)null,
-            frameNumber = f.FrameNumber,
-            totalFrames = f.TotalFrames
-        });
-
-        return Results.Ok(result);
-    }
-    catch (Exception ex)
-    {
-        logs.Error($"błąd batch: sesja={sessionId} {ex.Message}");
-        return Results.Problem("błąd batch konwersji");
-    }
 });
 
 app.MapHub<ConversionHub>("/hub/conversion");
