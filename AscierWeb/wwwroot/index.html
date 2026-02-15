@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ascier - konwerter ascii</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1 class="logo">⣿ ASCIER</h1>
+            <p class="subtitle">konwerter mediów na ascii art &mdash; optymalizowany na operacjach bitowych</p>
+        </header>
+
+        <div class="main-layout">
+            <!-- panel kontrolny -->
+            <aside class="controls">
+                <div class="control-group">
+                    <label>plik (obraz lub wideo)</label>
+                    <input type="file" id="fileInput" accept="image/*,video/*">
+                    <div class="file-info" id="fileInfo"></div>
+                </div>
+
+                <div class="control-group">
+                    <label>efekt</label>
+                    <select id="effectSelect">
+                        <option value="classic">classic - luminancja</option>
+                        <option value="color">color - z kolorami</option>
+                        <option value="edge">edge - detekcja krawędzi</option>
+                        <option value="matrix">matrix - kaskadowe znaki</option>
+                        <option value="dither">dither - floyd-steinberg</option>
+                        <option value="braille">braille - unicode 2x4</option>
+                        <option value="block">block - elementy ░▒▓█</option>
+                        <option value="invert">invert - odwrócona luminancja</option>
+                        <option value="threshold">threshold - binarny próg</option>
+                        <option value="halftone">halftone - druk rastrowy</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>krok próbkowania: <span id="stepValue">8</span>px</label>
+                    <input type="range" id="stepRange" min="1" max="32" value="8">
+                </div>
+
+                <div class="control-group">
+                    <label>max kolumn: <span id="maxColsValue">200</span></label>
+                    <input type="range" id="maxColsRange" min="40" max="400" value="200">
+                </div>
+
+                <div class="control-group">
+                    <label>próg: <span id="thresholdValue">128</span></label>
+                    <input type="range" id="thresholdRange" min="0" max="255" value="128">
+                </div>
+
+                <div class="control-group toggles">
+                    <label class="toggle">
+                        <input type="checkbox" id="colorMode">
+                        <span>tryb kolorowy</span>
+                    </label>
+                    <label class="toggle">
+                        <input type="checkbox" id="invertMode">
+                        <span>inwersja</span>
+                    </label>
+                </div>
+
+                <div class="control-group">
+                    <button id="convertBtn" class="btn btn-primary" disabled>konwertuj</button>
+                    <button id="downloadBtn" class="btn btn-secondary" disabled>pobierz .txt</button>
+                </div>
+
+                <!-- kontrola wideo -->
+                <div class="control-group video-controls" id="videoControls" style="display:none">
+                    <label>klatka: <span id="frameInfo">0/0</span></label>
+                    <div class="frame-nav">
+                        <button id="prevFrame" class="btn btn-small">◀ prev</button>
+                        <button id="playBtn" class="btn btn-small">▶ play</button>
+                        <button id="nextFrame" class="btn btn-small">next ▶</button>
+                    </div>
+                    <input type="range" id="frameSlider" min="0" max="0" value="0">
+                    <div class="video-meta" id="videoMeta"></div>
+                </div>
+
+                <div class="control-group stats" id="stats">
+                    <div id="statsText"></div>
+                </div>
+            </aside>
+
+            <!-- podgląd ascii -->
+            <main class="preview-area">
+                <div class="preview-container" id="previewContainer">
+                    <canvas id="asciiCanvas"></canvas>
+                    <div class="placeholder" id="placeholder">
+                        <pre class="ascii-logo">
+ ▄▀█ █▀ █▀▀ █ █▀▀ █▀█
+ █▀█ ▄█ █▄▄ █ ██▄ █▀▄
+                        </pre>
+                        <p>wrzuć obrazek lub wideo żeby zacząć</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

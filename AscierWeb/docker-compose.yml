@@ -1,0 +1,35 @@
+services:
+  ascier:
+    build: .
+    container_name: ascier_web
+    restart: unless-stopped
+    ports:
+      - "5219:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_HTTP_PORTS=80
+    volumes:
+      - ascier-tmp:/tmp/ascier_video
+    networks:
+      - soldatserver_default
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ascier-tmp:
+    name: ascier_tmp
+
+networks:
+  soldatserver_default:
+    name: soldat_project_soldatserver_default
+    external: true
