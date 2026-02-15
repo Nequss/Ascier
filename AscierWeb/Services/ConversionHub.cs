@@ -3,28 +3,45 @@ using AscierWeb.Core;
 
 namespace AscierWeb.Services;
 
-// hub signalr do komunikacji w czasie rzeczywistym
-// klient wysyła ustawienia, serwer przetwarza i odsyła ramkę ascii
-// minimalnny overhead - jeden hub obsługuje zarówno obrazy jak i wideo
+// hub signalr - ramki ascii + logi w czasie rzeczywistym
 public sealed class ConversionHub : Hub
 {
     private readonly ImageService _imageService;
     private readonly VideoService _videoService;
+    private readonly LogService _logService;
 
-    public ConversionHub(ImageService imageService, VideoService videoService)
+    public ConversionHub(ImageService imageService, VideoService videoService, LogService logService)
     {
         _imageService = imageService;
         _videoService = videoService;
+        _logService = logService;
     }
 
-    // przetwarzanie klatki wideo z nowymi ustawieniami
+    // subskrypcja logów w czasie rzeczywistym
+    public async Task SubscribeLogs()
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, "logs");
+
+        // wyślij ostatnie logi do nowego subskrybenta
+        var recent = _logService.GetRecent(50);
+        foreach (var entry in recent)
+        {
+            await Clients.Caller.SendAsync("NewLog", new
+            {
+                timestamp = entry.Timestamp.ToString("HH:mm:ss.fff"),
+                level = entry.Level,
+                message = entry.Message
+            });
+        }
+    }
+
+    // przetwarzanie klatki wideo
     public async Task RequestFrame(string sessionId, int frameNumber, ConversionSettings settings)
     {
         var frame = await _videoService.GetFrameAsync(sessionId, frameNumber, settings);
 
         if (frame != null)
         {
-            // konwersja kolorów na base64 dla efektywnego transferu
             string? colorsBase64 = frame.ColorRgb != null
                 ? Convert.ToBase64String(frame.ColorRgb)
                 : null;
@@ -45,12 +62,10 @@ public sealed class ConversionHub : Hub
         }
     }
 
-    // lista dostępnych efektów
     public async Task GetEffects()
     {
         var effects = EffectRegistry.List()
             .Select(e => new { name = e.Name, description = e.Description });
-
         await Clients.Caller.SendAsync("EffectsList", effects);
     }
 }

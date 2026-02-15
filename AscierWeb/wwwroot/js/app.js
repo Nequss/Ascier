@@ -1,10 +1,10 @@
-// ascier - klient webowy
-// renderowanie ascii na canvas, komunikacja z serwerem przez api i signalr
+// ascier web - klient
+// tekst w <pre>, progress bars, logi w czasie rzeczywistym
 
 (function () {
     'use strict';
 
-    // elementy dom
+    // dom
     const fileInput = document.getElementById('fileInput');
     const effectSelect = document.getElementById('effectSelect');
     const stepRange = document.getElementById('stepRange');
@@ -13,12 +13,13 @@
     const maxColsValue = document.getElementById('maxColsValue');
     const thresholdRange = document.getElementById('thresholdRange');
     const thresholdValue = document.getElementById('thresholdValue');
+    const fontSizeRange = document.getElementById('fontSizeRange');
+    const fontSizeValue = document.getElementById('fontSizeValue');
     const colorMode = document.getElementById('colorMode');
     const invertMode = document.getElementById('invertMode');
     const convertBtn = document.getElementById('convertBtn');
     const downloadBtn = document.getElementById('downloadBtn');
-    const canvas = document.getElementById('asciiCanvas');
-    const ctx = canvas.getContext('2d');
+    const asciiOutput = document.getElementById('asciiOutput');
     const placeholder = document.getElementById('placeholder');
     const fileInfo = document.getElementById('fileInfo');
     const statsText = document.getElementById('statsText');
@@ -29,8 +30,17 @@
     const prevFrameBtn = document.getElementById('prevFrame');
     const nextFrameBtn = document.getElementById('nextFrame');
     const playBtn = document.getElementById('playBtn');
+    const progressGroup = document.getElementById('progressGroup');
+    const progressLabel = document.getElementById('progressLabel');
+    const progressFill = document.getElementById('progressFill');
+    const logToggle = document.getElementById('logToggle');
+    const logBody = document.getElementById('logBody');
+    const logOutput = document.getElementById('logOutput');
+    const logBadge = document.getElementById('logBadge');
+    const logArrow = document.getElementById('logArrow');
+    const clearLogs = document.getElementById('clearLogs');
 
-    // stan aplikacji
+    // state
     let currentFile = null;
     let isVideo = false;
     let videoSessionId = null;
@@ -38,46 +48,88 @@
     let totalFrames = 0;
     let videoFps = 30;
     let isPlaying = false;
-    let playTimer = null;
     let lastAsciiText = '';
     let connection = null;
+    let logCount = 0;
+    let logOpen = false;
+    let converting = false;
 
-    // czcionka do renderowania ascii na canvasie
-    const FONT_SIZE = 10;
-    const FONT = `${FONT_SIZE}px monospace`;
-    let charWidth = 0;
-    let charHeight = 0;
+    // -- progress --
 
-    // pomiar szerokości znaku
-    function measureChar() {
-        ctx.font = FONT;
-        const m = ctx.measureText('M');
-        charWidth = m.width;
-        charHeight = FONT_SIZE * 1.15;
+    function showProgress(label, pct) {
+        progressGroup.style.display = 'block';
+        progressLabel.textContent = label;
+        if (pct >= 0) {
+            progressFill.style.width = pct + '%';
+            progressFill.classList.remove('indeterminate');
+        } else {
+            progressFill.style.width = '100%';
+            progressFill.classList.add('indeterminate');
+        }
     }
 
-    // inicjalizacja signalr
+    function hideProgress() {
+        progressGroup.style.display = 'none';
+        progressFill.style.width = '0%';
+        progressFill.classList.remove('indeterminate');
+    }
+
+    // -- signalr --
+
     function initSignalR() {
         connection = new signalR.HubConnectionBuilder()
             .withUrl('/hub/conversion')
             .withAutomaticReconnect()
             .build();
 
-        connection.on('ReceiveFrame', (data) => {
-            renderFrame(data);
+        connection.on('NewLog', function (entry) {
+            appendLog(entry);
+        });
+
+        connection.on('ReceiveFrame', function (data) {
+            renderText(data);
             updateStats(data);
         });
 
-        connection.on('Error', (msg) => {
-            console.error('serwer:', msg);
+        connection.on('Error', function (msg) {
+            appendLog({ timestamp: timeNow(), level: 'error', message: msg });
         });
 
-        connection.start().catch(err => {
-            console.warn('signalr niedostępny, używam rest api:', err.message);
+        connection.start().then(function () {
+            connection.invoke('SubscribeLogs').catch(function () {});
+            appendLog({ timestamp: timeNow(), level: 'info', message: 'połączono z serwerem' });
+        }).catch(function (err) {
+            appendLog({ timestamp: timeNow(), level: 'warn', message: 'signalr: ' + err.message });
         });
     }
 
-    // pobranie ustawień z kontrolek
+    function timeNow() {
+        var d = new Date();
+        var h = String(d.getHours()).padStart(2, '0');
+        var m = String(d.getMinutes()).padStart(2, '0');
+        var s = String(d.getSeconds()).padStart(2, '0');
+        var ms = String(d.getMilliseconds()).padStart(3, '0');
+        return h + ':' + m + ':' + s + '.' + ms;
+    }
+
+    // -- logs --
+
+    function appendLog(entry) {
+        var cls = 'log-line-' + entry.level;
+        var line = document.createElement('span');
+        line.className = cls;
+        line.textContent = entry.timestamp + ' [' + entry.level + '] ' + entry.message + '\n';
+        logOutput.appendChild(line);
+        logOutput.scrollTop = logOutput.scrollHeight;
+        logCount++;
+        logBadge.textContent = logCount;
+        if (entry.level === 'error') {
+            logBadge.classList.add('error');
+        }
+    }
+
+    // -- settings --
+
     function getSettings() {
         return {
             effect: effectSelect.value,
@@ -89,9 +141,8 @@
         };
     }
 
-    // budowanie form data do wysyłki
-    function buildFormData(file, settings, extraFields) {
-        const fd = new FormData();
+    function buildFormData(file, settings, extra) {
+        var fd = new FormData();
         if (file) fd.append('file', file);
         fd.append('effect', settings.effect);
         fd.append('step', settings.step);
@@ -99,68 +150,158 @@
         fd.append('threshold', settings.threshold);
         fd.append('invert', settings.invert);
         fd.append('maxColumns', settings.maxColumns);
-        if (extraFields) {
-            for (const [k, v] of Object.entries(extraFields)) {
-                fd.append(k, v);
-            }
+        if (extra) {
+            Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
         }
         return fd;
     }
 
-    // konwersja obrazu
-    async function convertImage() {
-        if (!currentFile) return;
+    // -- upload with progress --
 
-        convertBtn.disabled = true;
-        convertBtn.textContent = 'przetwarzam...';
-        const startTime = performance.now();
+    function uploadWithProgress(url, formData, onProgress) {
+        return new Promise(function (resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
 
-        try {
-            const settings = getSettings();
-            const fd = buildFormData(currentFile, settings);
+            xhr.upload.addEventListener('progress', function (e) {
+                if (e.lengthComputable) onProgress(e.loaded / e.total);
+            });
 
-            const resp = await fetch('/api/convert/image', { method: 'POST', body: fd });
-            if (!resp.ok) {
-                const err = await resp.text();
-                alert('błąd: ' + err);
-                return;
-            }
+            xhr.addEventListener('load', function () {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        reject(new Error('nieprawidłowa odpowiedź serwera'));
+                    }
+                } else {
+                    reject(new Error(xhr.responseText || 'HTTP ' + xhr.status));
+                }
+            });
 
-            const data = await resp.json();
-            const elapsed = performance.now() - startTime;
+            xhr.addEventListener('error', function () {
+                reject(new Error('błąd sieci'));
+            });
 
-            renderFrame(data);
-            updateStats(data, elapsed);
-            lastAsciiText = data.text;
-            downloadBtn.disabled = false;
-        } catch (e) {
-            console.error('błąd konwersji:', e);
-            alert('błąd konwersji: ' + e.message);
-        } finally {
-            convertBtn.disabled = false;
-            convertBtn.textContent = 'konwertuj';
-        }
+            xhr.send(formData);
+        });
     }
 
-    // upload wideo i inicjalizacja sesji
-    async function uploadVideo() {
-        if (!currentFile) return;
+    // -- html escape --
 
-        convertBtn.disabled = true;
-        convertBtn.textContent = 'uploaduję...';
+    function esc(ch) {
+        if (ch === '&') return '&amp;';
+        if (ch === '<') return '&lt;';
+        if (ch === '>') return '&gt;';
+        return ch;
+    }
 
-        try {
-            const settings = getSettings();
-            const fd = buildFormData(currentFile, settings);
+    // -- render text output --
 
-            const resp = await fetch('/api/convert/video', { method: 'POST', body: fd });
-            if (!resp.ok) {
-                const err = await resp.text();
-                alert('błąd: ' + err);
-                return;
+    function renderText(data) {
+        if (!data || !data.text) return;
+
+        placeholder.style.display = 'none';
+        asciiOutput.style.display = 'block';
+
+        if (data.colors) {
+            // tryb kolorowy - span per znak
+            var binary = atob(data.colors);
+            var colors = new Uint8Array(binary.length);
+            for (var i = 0; i < binary.length; i++) {
+                colors[i] = binary.charCodeAt(i);
             }
 
-            const data = await resp.json();
+            var lines = data.text.split('\n');
+            var parts = [];
+            var ci = 0;
+
+            for (var y = 0; y < lines.length; y++) {
+                var line = lines[y];
+                if (line.length === 0) continue;
+
+                for (var x = 0; x < line.length; x++) {
+                    var idx = ci * 3;
+                    var r = colors[idx] || 0;
+                    var g = colors[idx + 1] || 0;
+                    var b = colors[idx + 2] || 0;
+                    parts.push('<span style="color:rgb(' + r + ',' + g + ',' + b + ')">' + esc(line[x]) + '</span>');
+                    ci++;
+                }
+                parts.push('\n');
+            }
+
+            asciiOutput.innerHTML = parts.join('');
+        } else {
+            // zwykły tekst
+            asciiOutput.textContent = data.text;
+        }
+
+        lastAsciiText = data.text;
+        downloadBtn.disabled = false;
+    }
+
+    function updateStats(data, ms) {
+        var cols = data.columns || 0;
+        var rows = data.rows || 0;
+        var t = cols + '×' + rows + ' = ' + (cols * rows).toLocaleString() + ' znaków';
+        t += '\nefekt: ' + effectSelect.value;
+        if (data.colors) t += ' [kolor]';
+        if (ms) t += '\nczas: ' + ms.toFixed(0) + 'ms';
+        if (data.totalFrames > 1) t += '\nklatka: ' + ((data.frameNumber || 0) + 1) + '/' + data.totalFrames;
+        statsText.textContent = t;
+    }
+
+    // -- image conversion --
+
+    function convertImage() {
+        if (!currentFile || converting) return;
+        converting = true;
+        convertBtn.disabled = true;
+        convertBtn.textContent = '...';
+
+        var settings = getSettings();
+        var fd = buildFormData(currentFile, settings);
+        var start = performance.now();
+
+        showProgress('upload...', 0);
+
+        uploadWithProgress('/api/convert/image', fd, function (pct) {
+            showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
+            if (pct >= 1) showProgress('przetwarzam...', -1);
+        }).then(function (data) {
+            var elapsed = performance.now() - start;
+            hideProgress();
+            renderText(data);
+            updateStats(data, elapsed);
+        }).catch(function (e) {
+            hideProgress();
+            appendLog({ timestamp: timeNow(), level: 'error', message: 'konwersja: ' + e.message });
+        }).finally(function () {
+            converting = false;
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'konwertuj';
+        });
+    }
+
+    // -- video upload --
+
+    function uploadVideo() {
+        if (!currentFile || converting) return;
+        converting = true;
+        convertBtn.disabled = true;
+        convertBtn.textContent = '...';
+
+        var settings = getSettings();
+        var fd = buildFormData(currentFile, settings);
+
+        showProgress('upload wideo...', 0);
+
+        uploadWithProgress('/api/convert/video', fd, function (pct) {
+            showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
+            if (pct >= 1) showProgress('analizuję wideo...', -1);
+        }).then(function (data) {
+            hideProgress();
             videoSessionId = data.sessionId;
             totalFrames = data.totalFrames;
             videoFps = data.fps || 30;
@@ -168,217 +309,155 @@
 
             frameSlider.max = totalFrames - 1;
             frameSlider.value = 0;
-            videoMeta.textContent = `${data.width}x${data.height} | ${videoFps.toFixed(1)}fps | ${data.duration.toFixed(1)}s`;
+            videoMeta.textContent = data.width + 'x' + data.height + ' | ' +
+                videoFps.toFixed(1) + 'fps | ' +
+                data.duration.toFixed(1) + 's | ' +
+                totalFrames + ' klatek';
             videoControls.style.display = 'block';
 
-            // załaduj pierwszą klatkę
-            await loadVideoFrame(0);
-        } catch (e) {
-            console.error('błąd uploadu wideo:', e);
-            alert('błąd uploadu: ' + e.message);
-        } finally {
+            converting = false;
             convertBtn.disabled = false;
             convertBtn.textContent = 'konwertuj';
-        }
+
+            // załaduj pierwszą klatkę
+            return loadVideoFrame(0);
+        }).catch(function (e) {
+            hideProgress();
+            appendLog({ timestamp: timeNow(), level: 'error', message: 'upload wideo: ' + e.message });
+            converting = false;
+            convertBtn.disabled = false;
+            convertBtn.textContent = 'konwertuj';
+        });
     }
 
-    // załaduj konkretną klatkę wideo
-    async function loadVideoFrame(frameNumber) {
-        if (!videoSessionId) return;
+    // -- video frame loading --
 
-        const startTime = performance.now();
-        const settings = getSettings();
-        const fd = buildFormData(null, settings, {
+    function loadVideoFrame(frameNumber) {
+        if (!videoSessionId) return Promise.resolve();
+
+        showProgress('klatka ' + (frameNumber + 1) + '/' + totalFrames, -1);
+
+        var start = performance.now();
+        var settings = getSettings();
+        var fd = buildFormData(null, settings, {
             sessionId: videoSessionId,
             frameNumber: frameNumber
         });
 
-        try {
-            const resp = await fetch('/api/convert/frame', { method: 'POST', body: fd });
-            if (!resp.ok) return;
-
-            const data = await resp.json();
-            const elapsed = performance.now() - startTime;
-
-            currentFrame = data.frameNumber;
-            frameSlider.value = currentFrame;
-            frameInfo.textContent = `${currentFrame + 1}/${data.totalFrames}`;
-
-            renderFrame(data);
-            updateStats(data, elapsed);
-            lastAsciiText = data.text;
-            downloadBtn.disabled = false;
-        } catch (e) {
-            console.error('błąd ładowania klatki:', e);
-        }
-    }
-
-    // renderowanie ramki ascii na canvasie
-    function renderFrame(data) {
-        if (!data || !data.text) return;
-
-        placeholder.style.display = 'none';
-        canvas.style.display = 'block';
-
-        measureChar();
-
-        const cols = data.columns;
-        const rows = data.rows;
-
-        // rozmiar canvasa dopasowany do treści
-        canvas.width = Math.ceil(cols * charWidth) + 2;
-        canvas.height = Math.ceil(rows * charHeight) + 2;
-
-        // czyszczenie - czarne tło
-        ctx.fillStyle = '#0a0a0f';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.font = FONT;
-        ctx.textBaseline = 'top';
-
-        // dekodowanie kolorów jeśli dostępne
-        let colors = null;
-        if (data.colors) {
-            const binary = atob(data.colors);
-            colors = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-                colors[i] = binary.charCodeAt(i);
-            }
-        }
-
-        // renderowanie znak po znaku
-        const lines = data.text.split('\n');
-        let charIdx = 0;
-
-        for (let y = 0; y < lines.length && y < rows; y++) {
-            const line = lines[y];
-            for (let x = 0; x < line.length && x < cols; x++) {
-                const ch = line[x];
-                if (ch === ' ') {
-                    charIdx++;
-                    continue;
+        return fetch('/api/convert/frame', { method: 'POST', body: fd })
+            .then(function (resp) {
+                if (!resp.ok) {
+                    return resp.text().then(function (t) { throw new Error(t); });
                 }
-
-                if (colors) {
-                    const ci = charIdx * 3;
-                    ctx.fillStyle = `rgb(${colors[ci]},${colors[ci + 1]},${colors[ci + 2]})`;
-                } else {
-                    // domyślny kolor zielony (terminal-style)
-                    ctx.fillStyle = '#00ff88';
-                }
-
-                ctx.fillText(ch, x * charWidth, y * charHeight);
-                charIdx++;
-            }
-        }
+                return resp.json();
+            })
+            .then(function (data) {
+                var elapsed = performance.now() - start;
+                currentFrame = data.frameNumber;
+                frameSlider.value = currentFrame;
+                frameInfo.textContent = (currentFrame + 1) + '/' + data.totalFrames;
+                renderText(data);
+                updateStats(data, elapsed);
+                hideProgress();
+            })
+            .catch(function (e) {
+                hideProgress();
+                appendLog({ timestamp: timeNow(), level: 'error', message: 'klatka ' + frameNumber + ': ' + e.message });
+            });
     }
 
-    // aktualizacja statystyk
-    function updateStats(data, elapsedMs) {
-        const cols = data.columns || 0;
-        const rows = data.rows || 0;
-        const chars = cols * rows;
-        const hasColors = !!data.colors;
-        const effect = effectSelect.value;
+    // -- video playback --
 
-        let text = `${cols}×${rows} = ${chars.toLocaleString()} znaków\n`;
-        text += `efekt: ${effect}`;
-        if (hasColors) text += ' [kolor]';
-        if (elapsedMs) text += `\nczas: ${elapsedMs.toFixed(0)}ms`;
-        if (data.totalFrames > 1) text += `\nklatka: ${(data.frameNumber || 0) + 1}/${data.totalFrames}`;
-
-        statsText.textContent = text;
+    function sleep(ms) {
+        return new Promise(function (r) { setTimeout(r, ms); });
     }
 
-    // odtwarzanie wideo
     function startPlayback() {
         if (isPlaying || !videoSessionId) return;
         isPlaying = true;
-        playBtn.textContent = '⏸ pause';
+        playBtn.textContent = '⏸';
 
-        const frameDelay = Math.max(50, 1000 / Math.min(videoFps, 10)); // max 10fps dla preview
-        playTimer = setInterval(async () => {
-            if (currentFrame >= totalFrames - 1) {
+        var frameDelay = Math.max(100, 1000 / Math.min(videoFps, 8));
+
+        (function loop() {
+            if (!isPlaying || currentFrame >= totalFrames - 1) {
                 stopPlayback();
                 return;
             }
             currentFrame++;
-            await loadVideoFrame(currentFrame);
-        }, frameDelay);
+            var start = performance.now();
+            loadVideoFrame(currentFrame).then(function () {
+                if (!isPlaying) return;
+                var elapsed = performance.now() - start;
+                var wait = Math.max(0, frameDelay - elapsed);
+                return sleep(wait);
+            }).then(function () {
+                if (isPlaying) loop();
+            });
+        })();
     }
 
     function stopPlayback() {
         isPlaying = false;
         playBtn.textContent = '▶ play';
-        if (playTimer) {
-            clearInterval(playTimer);
-            playTimer = null;
-        }
     }
 
-    // eksport ascii do pliku tekstowego
-    function downloadAscii() {
-        if (!lastAsciiText) return;
+    // -- download .txt --
 
-        const blob = new Blob([lastAsciiText], { type: 'text/plain;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
+    function downloadTxt() {
+        if (!lastAsciiText) return;
+        var blob = new Blob([lastAsciiText], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
         a.href = url;
         a.download = 'ascii_art.txt';
         a.click();
         URL.revokeObjectURL(url);
     }
 
-    // event handlers
-    fileInput.addEventListener('change', (e) => {
+    // -- event listeners --
+
+    fileInput.addEventListener('change', function (e) {
         currentFile = e.target.files[0];
         if (!currentFile) {
             convertBtn.disabled = true;
             return;
         }
 
-        // detekcja typu pliku
-        const ext = currentFile.name.split('.').pop().toLowerCase();
-        const videoExts = new Set(['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'wmv']);
-        isVideo = videoExts.has(ext);
+        var ext = currentFile.name.split('.').pop().toLowerCase();
+        isVideo = ['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'wmv'].indexOf(ext) !== -1;
+        var mb = (currentFile.size / 1048576).toFixed(2);
+        fileInfo.textContent = currentFile.name + ' (' + mb + ' MB)' + (isVideo ? ' 🎬' : ' 🖼️');
 
-        const sizeMb = (currentFile.size / (1024 * 1024)).toFixed(2);
-        fileInfo.textContent = `${currentFile.name} (${sizeMb} MB) ${isVideo ? '🎬 wideo' : '🖼️ obraz'}`;
-
-        // reset stanu wideo
         videoSessionId = null;
         videoControls.style.display = 'none';
         stopPlayback();
-
         convertBtn.disabled = false;
     });
 
-    convertBtn.addEventListener('click', () => {
-        if (isVideo) {
-            uploadVideo();
-        } else {
-            convertImage();
-        }
+    convertBtn.addEventListener('click', function () {
+        if (isVideo) uploadVideo();
+        else convertImage();
     });
 
-    downloadBtn.addEventListener('click', downloadAscii);
+    downloadBtn.addEventListener('click', downloadTxt);
 
-    // suwaki - aktualizacja wartości w label
-    stepRange.addEventListener('input', () => { stepValue.textContent = stepRange.value; });
-    maxColsRange.addEventListener('input', () => { maxColsValue.textContent = maxColsRange.value; });
-    thresholdRange.addEventListener('input', () => { thresholdValue.textContent = thresholdRange.value; });
+    stepRange.addEventListener('input', function () {
+        stepValue.textContent = stepRange.value;
+    });
+    maxColsRange.addEventListener('input', function () {
+        maxColsValue.textContent = maxColsRange.value;
+    });
+    thresholdRange.addEventListener('input', function () {
+        thresholdValue.textContent = thresholdRange.value;
+    });
+    fontSizeRange.addEventListener('input', function () {
+        fontSizeValue.textContent = fontSizeRange.value;
+        asciiOutput.style.fontSize = fontSizeRange.value + 'px';
+        asciiOutput.style.lineHeight = Math.round(parseInt(fontSizeRange.value) * 1.1) + 'px';
+    });
 
-    // auto-reconvert przy zmianie ustawień (dla obrazów)
-    const autoReconvert = () => {
-        if (!isVideo && currentFile && lastAsciiText) {
-            convertImage();
-        }
-    };
-
-    effectSelect.addEventListener('change', autoReconvert);
-
-    // kontrola wideo
-    prevFrameBtn.addEventListener('click', () => {
+    prevFrameBtn.addEventListener('click', function () {
         stopPlayback();
         if (currentFrame > 0) {
             currentFrame--;
@@ -386,7 +465,7 @@
         }
     });
 
-    nextFrameBtn.addEventListener('click', () => {
+    nextFrameBtn.addEventListener('click', function () {
         stopPlayback();
         if (currentFrame < totalFrames - 1) {
             currentFrame++;
@@ -394,23 +473,32 @@
         }
     });
 
-    playBtn.addEventListener('click', () => {
+    playBtn.addEventListener('click', function () {
         if (isPlaying) stopPlayback();
         else startPlayback();
     });
 
-    frameSlider.addEventListener('input', () => {
+    frameSlider.addEventListener('input', function () {
         stopPlayback();
         currentFrame = parseInt(frameSlider.value);
         loadVideoFrame(currentFrame);
     });
 
-    // re-konwersja klatki wideo przy zmianie ustawień
-    effectSelect.addEventListener('change', () => {
-        if (isVideo && videoSessionId) loadVideoFrame(currentFrame);
+    // log panel toggle
+    logToggle.addEventListener('click', function () {
+        logOpen = !logOpen;
+        logBody.style.display = logOpen ? 'block' : 'none';
+        logArrow.textContent = logOpen ? '▼' : '▲';
+        if (logOpen) logBadge.classList.remove('error');
     });
 
-    // inicjalizacja
-    measureChar();
+    clearLogs.addEventListener('click', function () {
+        logOutput.textContent = '';
+        logCount = 0;
+        logBadge.textContent = '0';
+        logBadge.classList.remove('error');
+    });
+
+    // init
     initSignalR();
 })();

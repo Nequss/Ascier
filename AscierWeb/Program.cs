@@ -1,19 +1,18 @@
 using AscierWeb.Core;
 using AscierWeb.Services;
+using Microsoft.AspNetCore.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// serwisy - singleton bo są bezstanowe (poza video który zarządza sesjami)
+builder.Services.AddSingleton<LogService>();
 builder.Services.AddSingleton<ImageService>();
 builder.Services.AddSingleton<VideoService>();
 
-// signalr z limitem wiadomości 1mb (wystarczy na duże ramki ascii)
 builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = 1024 * 1024;
 });
 
-// ograniczenie rozmiaru uploadu do 500mb
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.MaxRequestBodySize = 500 * 1024 * 1024;
@@ -21,17 +20,44 @@ builder.WebHost.ConfigureKestrel(options =>
 
 var app = builder.Build();
 
+// broadcast logów do klientów signalr
+var logService = app.Services.GetRequiredService<LogService>();
+var hubContext = app.Services.GetRequiredService<IHubContext<ConversionHub>>();
+logService.OnLog += (entry) =>
+{
+    _ = hubContext.Clients.Group("logs").SendAsync("NewLog", new
+    {
+        timestamp = entry.Timestamp.ToString("HH:mm:ss.fff"),
+        level = entry.Level,
+        message = entry.Message
+    });
+};
+
+logService.Info("ascier web uruchomiony");
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// endpoint: lista efektów
+// lista efektów
 app.MapGet("/api/effects", () =>
 {
     return Results.Ok(EffectRegistry.List().Select(e => new { e.Name, e.Description }));
 });
 
-// endpoint: konwersja obrazu
-app.MapPost("/api/convert/image", async (HttpRequest request, ImageService imageService) =>
+// ostatnie logi
+app.MapGet("/api/logs", (LogService logs) =>
+{
+    var recent = logs.GetRecent(100);
+    return Results.Ok(recent.Select(e => new
+    {
+        timestamp = e.Timestamp.ToString("HH:mm:ss.fff"),
+        level = e.Level,
+        message = e.Message
+    }));
+});
+
+// konwersja obrazu
+app.MapPost("/api/convert/image", async (HttpRequest request, ImageService imageService, LogService logs) =>
 {
     if (!request.HasFormContentType)
         return Results.BadRequest("wymagany content-type: multipart/form-data");
@@ -42,36 +68,49 @@ app.MapPost("/api/convert/image", async (HttpRequest request, ImageService image
     if (file == null || file.Length == 0)
         return Results.BadRequest("brak pliku w żądaniu");
 
-    // walidacja rozszerzenia
     var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
     var allowedImageExts = new HashSet<string> { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tiff" };
 
     if (!allowedImageExts.Contains(ext))
         return Results.BadRequest("nieobsługiwany format obrazu");
 
-    // parsowanie ustawień z form data
     var settings = ParseSettings(form);
+    var sizeMb = (file.Length / 1048576.0).ToString("F2");
+    logs.Info($"konwersja obrazu: {file.FileName} ({sizeMb}MB) efekt={settings.Effect} step={settings.Step}");
 
-    using var stream = file.OpenReadStream();
-    var frame = await imageService.ConvertAsync(stream, settings);
+    var sw = System.Diagnostics.Stopwatch.StartNew();
 
-    string? colorsBase64 = frame.ColorRgb != null
-        ? Convert.ToBase64String(frame.ColorRgb)
-        : null;
-
-    return Results.Ok(new
+    try
     {
-        text = frame.Text,
-        columns = frame.Columns,
-        rows = frame.Rows,
-        colors = colorsBase64,
-        frameNumber = 0,
-        totalFrames = 1
-    });
+        using var stream = file.OpenReadStream();
+        var frame = await imageService.ConvertAsync(stream, settings);
+        sw.Stop();
+
+        string? colorsBase64 = frame.ColorRgb != null
+            ? Convert.ToBase64String(frame.ColorRgb)
+            : null;
+
+        logs.Info($"gotowe: {frame.Columns}x{frame.Rows} ({(frame.Columns * frame.Rows).ToString("N0")} znaków) {sw.ElapsedMilliseconds}ms");
+
+        return Results.Ok(new
+        {
+            text = frame.Text,
+            columns = frame.Columns,
+            rows = frame.Rows,
+            colors = colorsBase64,
+            frameNumber = 0,
+            totalFrames = 1
+        });
+    }
+    catch (Exception ex)
+    {
+        logs.Error($"błąd konwersji obrazu: {ex.Message}");
+        return Results.Problem("błąd przetwarzania obrazu");
+    }
 });
 
-// endpoint: upload wideo i utworzenie sesji
-app.MapPost("/api/convert/video", async (HttpRequest request, VideoService videoService) =>
+// upload wideo i utworzenie sesji
+app.MapPost("/api/convert/video", async (HttpRequest request, VideoService videoService, LogService logs) =>
 {
     if (!request.HasFormContentType)
         return Results.BadRequest("wymagany content-type: multipart/form-data");
@@ -88,22 +127,35 @@ app.MapPost("/api/convert/video", async (HttpRequest request, VideoService video
     if (!allowedVideoExts.Contains(ext))
         return Results.BadRequest("nieobsługiwany format wideo");
 
-    using var stream = file.OpenReadStream();
-    var session = await videoService.CreateSessionAsync(stream, file.FileName);
+    var sizeMb = (file.Length / 1048576.0).ToString("F2");
+    logs.Info($"upload wideo: {file.FileName} ({sizeMb}MB)");
 
-    return Results.Ok(new
+    try
     {
-        sessionId = session.Id,
-        width = session.Width,
-        height = session.Height,
-        fps = session.Fps,
-        duration = session.Duration,
-        totalFrames = session.TotalFrames
-    });
+        using var stream = file.OpenReadStream();
+        var session = await videoService.CreateSessionAsync(stream, file.FileName);
+
+        logs.Info($"sesja wideo: {session.Id} {session.Width}x{session.Height} {session.Fps:F1}fps {session.Duration:F1}s ({session.TotalFrames} klatek)");
+
+        return Results.Ok(new
+        {
+            sessionId = session.Id,
+            width = session.Width,
+            height = session.Height,
+            fps = session.Fps,
+            duration = session.Duration,
+            totalFrames = session.TotalFrames
+        });
+    }
+    catch (Exception ex)
+    {
+        logs.Error($"błąd uploadu wideo: {ex.Message}");
+        return Results.Problem("błąd przetwarzania wideo");
+    }
 });
 
-// endpoint: pobranie klatki wideo
-app.MapPost("/api/convert/frame", async (HttpRequest request, VideoService videoService, ImageService imageService) =>
+// pobranie klatki wideo
+app.MapPost("/api/convert/frame", async (HttpRequest request, VideoService videoService, LogService logs) =>
 {
     if (!request.HasFormContentType)
         return Results.BadRequest("wymagany content-type: multipart/form-data");
@@ -121,47 +173,36 @@ app.MapPost("/api/convert/frame", async (HttpRequest request, VideoService video
 
     var settings = ParseSettings(form);
 
-    var frame = await videoService.GetFrameAsync(sessionId, frameNumber, settings);
-    if (frame == null)
-        return Results.NotFound("sesja nie znaleziona lub klatka niedostępna");
-
-    string? colorsBase64 = frame.ColorRgb != null
-        ? Convert.ToBase64String(frame.ColorRgb)
-        : null;
-
-    return Results.Ok(new
+    try
     {
-        text = frame.Text,
-        columns = frame.Columns,
-        rows = frame.Rows,
-        colors = colorsBase64,
-        frameNumber = frame.FrameNumber,
-        totalFrames = frame.TotalFrames
-    });
+        var frame = await videoService.GetFrameAsync(sessionId, frameNumber, settings);
+        if (frame == null)
+        {
+            logs.Warn($"klatka niedostępna: sesja={sessionId} klatka={frameNumber}");
+            return Results.NotFound("sesja nie znaleziona lub klatka niedostępna");
+        }
+
+        string? colorsBase64 = frame.ColorRgb != null
+            ? Convert.ToBase64String(frame.ColorRgb)
+            : null;
+
+        return Results.Ok(new
+        {
+            text = frame.Text,
+            columns = frame.Columns,
+            rows = frame.Rows,
+            colors = colorsBase64,
+            frameNumber = frame.FrameNumber,
+            totalFrames = frame.TotalFrames
+        });
+    }
+    catch (Exception ex)
+    {
+        logs.Error($"błąd klatki: sesja={sessionId} klatka={frameNumber} {ex.Message}");
+        return Results.Problem("błąd przetwarzania klatki");
+    }
 });
 
-// endpoint: pobranie ascii jako plik tekstowy
-app.MapPost("/api/download/text", async (HttpRequest request, ImageService imageService) =>
-{
-    if (!request.HasFormContentType)
-        return Results.BadRequest("wymagany content-type: multipart/form-data");
-
-    var form = await request.ReadFormAsync();
-    var file = form.Files.GetFile("file");
-
-    if (file == null || file.Length == 0)
-        return Results.BadRequest("brak pliku w żądaniu");
-
-    var settings = ParseSettings(form);
-
-    using var stream = file.OpenReadStream();
-    var frame = await imageService.ConvertAsync(stream, settings);
-
-    var bytes = System.Text.Encoding.UTF8.GetBytes(frame.Text);
-    return Results.File(bytes, "text/plain", "ascii_art.txt");
-});
-
-// hub signalr do streamingu klatek w czasie rzeczywistym
 app.MapHub<ConversionHub>("/hub/conversion");
 
 app.Run();

@@ -10,11 +10,10 @@
     <div class="app">
         <header class="header">
             <h1 class="logo">⣿ ASCIER</h1>
-            <p class="subtitle">konwerter mediów na ascii art &mdash; optymalizowany na operacjach bitowych</p>
+            <p class="subtitle">konwerter mediów na ascii art</p>
         </header>
 
         <div class="main-layout">
-            <!-- panel kontrolny -->
             <aside class="controls">
                 <div class="control-group">
                     <label>plik (obraz lub wideo)</label>
@@ -25,26 +24,26 @@
                 <div class="control-group">
                     <label>efekt</label>
                     <select id="effectSelect">
-                        <option value="classic">classic - luminancja</option>
-                        <option value="color">color - z kolorami</option>
-                        <option value="edge">edge - detekcja krawędzi</option>
-                        <option value="matrix">matrix - kaskadowe znaki</option>
-                        <option value="dither">dither - floyd-steinberg</option>
-                        <option value="braille">braille - unicode 2x4</option>
-                        <option value="block">block - elementy ░▒▓█</option>
-                        <option value="invert">invert - odwrócona luminancja</option>
-                        <option value="threshold">threshold - binarny próg</option>
-                        <option value="halftone">halftone - druk rastrowy</option>
+                        <option value="classic">classic</option>
+                        <option value="color">color</option>
+                        <option value="edge">edge</option>
+                        <option value="matrix">matrix</option>
+                        <option value="dither">dither</option>
+                        <option value="braille">braille</option>
+                        <option value="block">block</option>
+                        <option value="invert">invert</option>
+                        <option value="threshold">threshold</option>
+                        <option value="halftone">halftone</option>
                     </select>
                 </div>
 
                 <div class="control-group">
-                    <label>krok próbkowania: <span id="stepValue">8</span>px</label>
+                    <label>krok: <span id="stepValue">8</span>px</label>
                     <input type="range" id="stepRange" min="1" max="32" value="8">
                 </div>
 
                 <div class="control-group">
-                    <label>max kolumn: <span id="maxColsValue">200</span></label>
+                    <label>kolumny: <span id="maxColsValue">200</span></label>
                     <input type="range" id="maxColsRange" min="40" max="400" value="200">
                 </div>
 
@@ -53,10 +52,15 @@
                     <input type="range" id="thresholdRange" min="0" max="255" value="128">
                 </div>
 
+                <div class="control-group">
+                    <label>font: <span id="fontSizeValue">9</span>px</label>
+                    <input type="range" id="fontSizeRange" min="4" max="18" value="9">
+                </div>
+
                 <div class="control-group toggles">
                     <label class="toggle">
                         <input type="checkbox" id="colorMode">
-                        <span>tryb kolorowy</span>
+                        <span>kolor</span>
                     </label>
                     <label class="toggle">
                         <input type="checkbox" id="invertMode">
@@ -64,18 +68,24 @@
                     </label>
                 </div>
 
-                <div class="control-group">
+                <div class="control-group buttons">
                     <button id="convertBtn" class="btn btn-primary" disabled>konwertuj</button>
                     <button id="downloadBtn" class="btn btn-secondary" disabled>pobierz .txt</button>
                 </div>
 
-                <!-- kontrola wideo -->
+                <div class="control-group" id="progressGroup" style="display:none">
+                    <label id="progressLabel">upload...</label>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+
                 <div class="control-group video-controls" id="videoControls" style="display:none">
                     <label>klatka: <span id="frameInfo">0/0</span></label>
                     <div class="frame-nav">
-                        <button id="prevFrame" class="btn btn-small">◀ prev</button>
+                        <button id="prevFrame" class="btn btn-small">◀</button>
                         <button id="playBtn" class="btn btn-small">▶ play</button>
-                        <button id="nextFrame" class="btn btn-small">next ▶</button>
+                        <button id="nextFrame" class="btn btn-small">▶</button>
                     </div>
                     <input type="range" id="frameSlider" min="0" max="0" value="0">
                     <div class="video-meta" id="videoMeta"></div>
@@ -86,19 +96,32 @@
                 </div>
             </aside>
 
-            <!-- podgląd ascii -->
-            <main class="preview-area">
-                <div class="preview-container" id="previewContainer">
-                    <canvas id="asciiCanvas"></canvas>
+            <main class="output-area">
+                <div class="output-container" id="outputContainer">
+                    <pre id="asciiOutput" class="ascii-output"></pre>
                     <div class="placeholder" id="placeholder">
                         <pre class="ascii-logo">
  ▄▀█ █▀ █▀▀ █ █▀▀ █▀█
  █▀█ ▄█ █▄▄ █ ██▄ █▀▄
                         </pre>
-                        <p>wrzuć obrazek lub wideo żeby zacząć</p>
+                        <p>wrzuć obrazek lub wideo</p>
                     </div>
                 </div>
             </main>
+        </div>
+
+        <div class="log-panel" id="logPanel">
+            <div class="log-header" id="logToggle">
+                <span>logi</span>
+                <span class="log-badge" id="logBadge">0</span>
+                <span class="log-arrow" id="logArrow">▲</span>
+            </div>
+            <div class="log-body" id="logBody" style="display:none">
+                <div class="log-actions">
+                    <button class="btn btn-small" id="clearLogs">wyczyść</button>
+                </div>
+                <pre class="log-output" id="logOutput"></pre>
+            </div>
         </div>
     </div>
 
