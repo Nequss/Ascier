@@ -27,7 +27,7 @@ body {
 }
 
 .header {
-    padding: 0.75rem 1.5rem;
+    padding: 0.6rem 1.5rem;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: baseline;
@@ -36,16 +36,13 @@ body {
 }
 
 .logo {
-    font-size: 1.4rem;
+    font-size: 1.3rem;
     color: var(--accent);
     letter-spacing: 0.3em;
     font-weight: 400;
 }
 
-.subtitle {
-    font-size: 0.7rem;
-    color: var(--text-dim);
-}
+.subtitle { font-size: 0.65rem; color: var(--text-dim); }
 
 .main-layout {
     display: flex;
@@ -53,27 +50,26 @@ body {
     overflow: hidden;
 }
 
-/* controls */
 .controls {
-    width: 260px;
-    min-width: 260px;
-    padding: 0.75rem;
+    width: 250px;
+    min-width: 250px;
+    padding: 0.6rem;
     border-right: 1px solid var(--border);
     overflow-y: auto;
     background: var(--surface);
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: 0.5rem;
 }
 
 .control-group {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.25rem;
 }
 
 .control-group label {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -82,25 +78,23 @@ body {
 input[type="file"] {
     background: var(--bg);
     border: 1px dashed var(--border);
-    padding: 0.4rem;
+    padding: 0.35rem;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     border-radius: 3px;
     cursor: pointer;
 }
 
-input[type="file"]:hover {
-    border-color: var(--accent-dim);
-}
+input[type="file"]:hover { border-color: var(--accent-dim); }
 
 select {
     background: var(--bg);
     border: 1px solid var(--border);
-    padding: 0.35rem;
+    padding: 0.3rem;
     color: var(--text);
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     border-radius: 3px;
 }
 
@@ -134,34 +128,18 @@ input[type="range"]::-moz-range-thumb {
     border: none;
 }
 
-.toggles {
-    flex-direction: row;
-    gap: 0.5rem;
-}
-
-.toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    cursor: pointer;
-}
-
+.toggles { flex-direction: row; gap: 0.5rem; }
+.toggle { display: flex; align-items: center; gap: 0.2rem; cursor: pointer; }
 .toggle input[type="checkbox"] { accent-color: var(--accent); }
-
-.toggle span {
-    font-size: 0.65rem;
-    color: var(--text);
-    text-transform: none;
-    letter-spacing: 0;
-}
+.toggle span { font-size: 0.6rem; color: var(--text); text-transform: none; letter-spacing: 0; }
 
 .btn {
-    padding: 0.4rem 0.8rem;
+    padding: 0.35rem 0.7rem;
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     cursor: pointer;
     border-radius: 3px;
     transition: all 0.15s;
@@ -169,11 +147,7 @@ input[type="range"]::-moz-range-thumb {
     letter-spacing: 0.1em;
 }
 
-.btn:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .btn-primary {
@@ -183,45 +157,34 @@ input[type="range"]::-moz-range-thumb {
     font-weight: bold;
 }
 
-.btn-primary:hover:not(:disabled) {
-    background: var(--accent);
+.btn-primary:hover:not(:disabled) { background: var(--accent); }
+.btn-small { padding: 0.2rem 0.45rem; font-size: 0.55rem; }
+
+.btn-play.playing {
+    background: var(--accent-dim);
     color: var(--bg);
+    border-color: var(--accent);
 }
 
-.btn-small {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.6rem;
-}
-
-.buttons {
-    flex-direction: row;
-    gap: 0.4rem;
-}
-
-.frame-nav {
-    display: flex;
-    gap: 0.25rem;
-}
-
-.video-meta, .file-info {
-    font-size: 0.6rem;
-    color: var(--text-dim);
-}
+.buttons { flex-direction: row; gap: 0.35rem; }
+.frame-nav { display: flex; gap: 0.2rem; flex-wrap: wrap; }
+.speed-control { display: flex; flex-direction: column; gap: 0.15rem; }
+.video-meta, .file-info, .buffer-info { font-size: 0.55rem; color: var(--text-dim); }
 
 .stats {
     margin-top: auto;
-    padding-top: 0.4rem;
+    padding-top: 0.3rem;
     border-top: 1px solid var(--border);
 }
 
 .stats #statsText {
-    font-size: 0.55rem;
+    font-size: 0.5rem;
     color: var(--text-dim);
     line-height: 1.4;
     white-space: pre-wrap;
 }
 
-/* progress bar */
+/* progress */
 .progress-bar {
     width: 100%;
     height: 6px;
@@ -235,14 +198,14 @@ input[type="range"]::-moz-range-thumb {
     background: var(--accent);
     border-radius: 3px;
     width: 0%;
-    transition: width 0.15s ease;
+    transition: width 0.1s ease;
 }
 
 .progress-fill.indeterminate {
     width: 100% !important;
     background: linear-gradient(90deg, var(--accent-dim) 0%, var(--accent) 50%, var(--accent-dim) 100%);
     background-size: 200% 100%;
-    animation: shimmer 1.2s ease-in-out infinite;
+    animation: shimmer 1s ease-in-out infinite;
 }
 
 @keyframes shimmer {
@@ -250,7 +213,7 @@ input[type="range"]::-moz-range-thumb {
     100% { background-position: -200% 0; }
 }
 
-/* output area */
+/* output */
 .output-area {
     flex: 1;
     overflow: hidden;
@@ -270,7 +233,7 @@ input[type="range"]::-moz-range-thumb {
     font-size: 9px;
     line-height: 10px;
     color: var(--accent);
-    padding: 0.5rem;
+    padding: 0.4rem;
     margin: 0;
     white-space: pre;
     user-select: all;
@@ -288,14 +251,8 @@ input[type="range"]::-moz-range-thumb {
     color: var(--text-dim);
 }
 
-.ascii-logo {
-    color: var(--accent);
-    font-size: 1.1rem;
-    line-height: 1.3;
-    margin-bottom: 0.8rem;
-}
-
-.placeholder p { font-size: 0.75rem; }
+.ascii-logo { color: var(--accent); font-size: 1rem; line-height: 1.3; margin-bottom: 0.5rem; }
+.placeholder p { font-size: 0.7rem; }
 
 /* log panel */
 .log-panel {
@@ -308,9 +265,9 @@ input[type="range"]::-moz-range-thumb {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.35rem 1rem;
+    padding: 0.3rem 1rem;
     cursor: pointer;
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -322,39 +279,24 @@ input[type="range"]::-moz-range-thumb {
 .log-badge {
     background: var(--border);
     color: var(--text-dim);
-    padding: 0.1rem 0.4rem;
+    padding: 0.05rem 0.35rem;
     border-radius: 8px;
-    font-size: 0.55rem;
-    min-width: 1.2rem;
+    font-size: 0.5rem;
+    min-width: 1rem;
     text-align: center;
 }
 
-.log-badge.error {
-    background: var(--danger);
-    color: #fff;
-}
-
-.log-arrow {
-    margin-left: auto;
-    font-size: 0.6rem;
-}
-
-.log-body {
-    border-top: 1px solid var(--border);
-}
-
-.log-actions {
-    padding: 0.3rem 1rem;
-    display: flex;
-    gap: 0.4rem;
-}
+.log-badge.error { background: var(--danger); color: #fff; }
+.log-arrow { margin-left: auto; font-size: 0.55rem; }
+.log-body { border-top: 1px solid var(--border); }
+.log-actions { padding: 0.25rem 1rem; display: flex; gap: 0.3rem; }
 
 .log-output {
-    height: 150px;
+    height: 140px;
     overflow-y: auto;
-    padding: 0.4rem 1rem;
+    padding: 0.3rem 1rem;
     font-family: 'Courier New', monospace;
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     line-height: 1.5;
     color: var(--text-dim);
     margin: 0;
@@ -362,24 +304,15 @@ input[type="range"]::-moz-range-thumb {
     word-break: break-all;
 }
 
-/* log level colors via data attribute set in JS */
 .log-line-error { color: var(--danger); }
 .log-line-warn { color: var(--warn); }
 .log-line-info { color: var(--text-dim); }
 
-/* responsive */
 @media (max-width: 768px) {
     .main-layout { flex-direction: column; }
     .controls {
-        width: 100%;
-        min-width: 100%;
-        max-height: 40vh;
-        border-right: none;
-        border-bottom: 1px solid var(--border);
+        width: 100%; min-width: 100%; max-height: 40vh;
+        border-right: none; border-bottom: 1px solid var(--border);
     }
-    .header {
-        flex-direction: column;
-        gap: 0.2rem;
-        padding: 0.5rem 0.75rem;
-    }
+    .header { flex-direction: column; gap: 0.2rem; padding: 0.4rem 0.75rem; }
 }

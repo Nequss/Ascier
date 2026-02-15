@@ -1,58 +1,54 @@
-// ascier web - klient
-// tekst w <pre>, progress bars, logi w czasie rzeczywistym
+// ascier web - video player z preload, batch i buforowaniem klatek
 
 (function () {
     'use strict';
 
-    // dom
-    const fileInput = document.getElementById('fileInput');
-    const effectSelect = document.getElementById('effectSelect');
-    const stepRange = document.getElementById('stepRange');
-    const stepValue = document.getElementById('stepValue');
-    const maxColsRange = document.getElementById('maxColsRange');
-    const maxColsValue = document.getElementById('maxColsValue');
-    const thresholdRange = document.getElementById('thresholdRange');
-    const thresholdValue = document.getElementById('thresholdValue');
-    const fontSizeRange = document.getElementById('fontSizeRange');
-    const fontSizeValue = document.getElementById('fontSizeValue');
-    const colorMode = document.getElementById('colorMode');
-    const invertMode = document.getElementById('invertMode');
-    const convertBtn = document.getElementById('convertBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
-    const asciiOutput = document.getElementById('asciiOutput');
-    const placeholder = document.getElementById('placeholder');
-    const fileInfo = document.getElementById('fileInfo');
-    const statsText = document.getElementById('statsText');
-    const videoControls = document.getElementById('videoControls');
-    const frameInfo = document.getElementById('frameInfo');
-    const frameSlider = document.getElementById('frameSlider');
-    const videoMeta = document.getElementById('videoMeta');
-    const prevFrameBtn = document.getElementById('prevFrame');
-    const nextFrameBtn = document.getElementById('nextFrame');
-    const playBtn = document.getElementById('playBtn');
-    const progressGroup = document.getElementById('progressGroup');
-    const progressLabel = document.getElementById('progressLabel');
-    const progressFill = document.getElementById('progressFill');
-    const logToggle = document.getElementById('logToggle');
-    const logBody = document.getElementById('logBody');
-    const logOutput = document.getElementById('logOutput');
-    const logBadge = document.getElementById('logBadge');
-    const logArrow = document.getElementById('logArrow');
-    const clearLogs = document.getElementById('clearLogs');
+    // dom refs
+    var $ = function (id) { return document.getElementById(id); };
+    var fileInput = $('fileInput');
+    var effectSelect = $('effectSelect');
+    var stepRange = $('stepRange'), stepValue = $('stepValue');
+    var maxColsRange = $('maxColsRange'), maxColsValue = $('maxColsValue');
+    var thresholdRange = $('thresholdRange'), thresholdValue = $('thresholdValue');
+    var fontSizeRange = $('fontSizeRange'), fontSizeValue = $('fontSizeValue');
+    var colorMode = $('colorMode'), invertMode = $('invertMode');
+    var convertBtn = $('convertBtn'), downloadBtn = $('downloadBtn');
+    var asciiOutput = $('asciiOutput'), placeholder = $('placeholder');
+    var fileInfo = $('fileInfo'), statsText = $('statsText');
+    var videoControls = $('videoControls');
+    var frameInfo = $('frameInfo'), frameSlider = $('frameSlider');
+    var videoMeta = $('videoMeta'), bufferInfoEl = $('bufferInfo');
+    var prevFrameBtn = $('prevFrame'), nextFrameBtn = $('nextFrame');
+    var playBtn = $('playBtn'), stopBtn = $('stopBtn');
+    var speedRange = $('speedRange'), speedValue = $('speedValue');
+    var progressGroup = $('progressGroup');
+    var progressLabel = $('progressLabel'), progressFill = $('progressFill');
+    var logToggle = $('logToggle'), logBody = $('logBody');
+    var logOutput = $('logOutput'), logBadge = $('logBadge');
+    var logArrow = $('logArrow'), clearLogs = $('clearLogs');
 
     // state
-    let currentFile = null;
-    let isVideo = false;
-    let videoSessionId = null;
-    let currentFrame = 0;
-    let totalFrames = 0;
-    let videoFps = 30;
-    let isPlaying = false;
-    let lastAsciiText = '';
-    let connection = null;
-    let logCount = 0;
-    let logOpen = false;
-    let converting = false;
+    var currentFile = null;
+    var isVideo = false;
+    var videoSessionId = null;
+    var currentFrame = 0;
+    var totalFrames = 0;
+    var videoFps = 30;
+    var isPlaying = false;
+    var playRafId = null;
+    var lastAsciiText = '';
+    var connection = null;
+    var logCount = 0;
+    var logOpen = false;
+    var converting = false;
+    var preloaded = false;
+    var playSpeed = 1.0;
+
+    // bufor klatek - tablica ascii text + colors dla każdej klatki
+    var frameBuffer = [];
+    var bufferBatchSize = 30;
+    var bufferingFrom = -1;
+    var bufferingPromise = null;
 
     // -- progress --
 
@@ -63,7 +59,6 @@
             progressFill.style.width = pct + '%';
             progressFill.classList.remove('indeterminate');
         } else {
-            progressFill.style.width = '100%';
             progressFill.classList.add('indeterminate');
         }
     }
@@ -82,22 +77,12 @@
             .withAutomaticReconnect()
             .build();
 
-        connection.on('NewLog', function (entry) {
-            appendLog(entry);
-        });
-
-        connection.on('ReceiveFrame', function (data) {
-            renderText(data);
-            updateStats(data);
-        });
-
-        connection.on('Error', function (msg) {
-            appendLog({ timestamp: timeNow(), level: 'error', message: msg });
-        });
+        connection.on('NewLog', function (e) { appendLog(e); });
+        connection.on('ReceiveFrame', function (d) { renderText(d); updateStats(d); });
+        connection.on('Error', function (m) { appendLog({ timestamp: timeNow(), level: 'error', message: m }); });
 
         connection.start().then(function () {
             connection.invoke('SubscribeLogs').catch(function () {});
-            appendLog({ timestamp: timeNow(), level: 'info', message: 'połączono z serwerem' });
         }).catch(function (err) {
             appendLog({ timestamp: timeNow(), level: 'warn', message: 'signalr: ' + err.message });
         });
@@ -105,27 +90,22 @@
 
     function timeNow() {
         var d = new Date();
-        var h = String(d.getHours()).padStart(2, '0');
-        var m = String(d.getMinutes()).padStart(2, '0');
-        var s = String(d.getSeconds()).padStart(2, '0');
-        var ms = String(d.getMilliseconds()).padStart(3, '0');
-        return h + ':' + m + ':' + s + '.' + ms;
+        return [d.getHours(), d.getMinutes(), d.getSeconds()].map(function (n) {
+            return String(n).padStart(2, '0');
+        }).join(':') + '.' + String(d.getMilliseconds()).padStart(3, '0');
     }
 
     // -- logs --
 
     function appendLog(entry) {
-        var cls = 'log-line-' + entry.level;
-        var line = document.createElement('span');
-        line.className = cls;
-        line.textContent = entry.timestamp + ' [' + entry.level + '] ' + entry.message + '\n';
-        logOutput.appendChild(line);
+        var span = document.createElement('span');
+        span.className = 'log-line-' + entry.level;
+        span.textContent = entry.timestamp + ' [' + entry.level + '] ' + entry.message + '\n';
+        logOutput.appendChild(span);
         logOutput.scrollTop = logOutput.scrollHeight;
         logCount++;
         logBadge.textContent = logCount;
-        if (entry.level === 'error') {
-            logBadge.classList.add('error');
-        }
+        if (entry.level === 'error') logBadge.classList.add('error');
     }
 
     // -- settings --
@@ -156,34 +136,25 @@
         return fd;
     }
 
-    // -- upload with progress --
+    // -- upload with XHR progress --
 
-    function uploadWithProgress(url, formData, onProgress) {
+    function uploadXHR(url, fd, onProgress) {
         return new Promise(function (resolve, reject) {
             var xhr = new XMLHttpRequest();
             xhr.open('POST', url);
-
             xhr.upload.addEventListener('progress', function (e) {
                 if (e.lengthComputable) onProgress(e.loaded / e.total);
             });
-
             xhr.addEventListener('load', function () {
                 if (xhr.status >= 200 && xhr.status < 300) {
-                    try {
-                        resolve(JSON.parse(xhr.responseText));
-                    } catch (e) {
-                        reject(new Error('nieprawidłowa odpowiedź serwera'));
-                    }
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch (e) { reject(new Error('json parse error')); }
                 } else {
                     reject(new Error(xhr.responseText || 'HTTP ' + xhr.status));
                 }
             });
-
-            xhr.addEventListener('error', function () {
-                reject(new Error('błąd sieci'));
-            });
-
-            xhr.send(formData);
+            xhr.addEventListener('error', function () { reject(new Error('network error')); });
+            xhr.send(fd);
         });
     }
 
@@ -196,21 +167,17 @@
         return ch;
     }
 
-    // -- render text output --
+    // -- render ascii text --
 
     function renderText(data) {
         if (!data || !data.text) return;
-
         placeholder.style.display = 'none';
         asciiOutput.style.display = 'block';
 
         if (data.colors) {
-            // tryb kolorowy - span per znak
             var binary = atob(data.colors);
             var colors = new Uint8Array(binary.length);
-            for (var i = 0; i < binary.length; i++) {
-                colors[i] = binary.charCodeAt(i);
-            }
+            for (var i = 0; i < binary.length; i++) colors[i] = binary.charCodeAt(i);
 
             var lines = data.text.split('\n');
             var parts = [];
@@ -218,26 +185,39 @@
 
             for (var y = 0; y < lines.length; y++) {
                 var line = lines[y];
-                if (line.length === 0) continue;
-
+                if (!line.length) continue;
                 for (var x = 0; x < line.length; x++) {
                     var idx = ci * 3;
-                    var r = colors[idx] || 0;
-                    var g = colors[idx + 1] || 0;
-                    var b = colors[idx + 2] || 0;
-                    parts.push('<span style="color:rgb(' + r + ',' + g + ',' + b + ')">' + esc(line[x]) + '</span>');
+                    parts.push('<span style="color:rgb(' +
+                        (colors[idx] || 0) + ',' + (colors[idx + 1] || 0) + ',' + (colors[idx + 2] || 0) +
+                        ')">' + esc(line[x]) + '</span>');
                     ci++;
                 }
                 parts.push('\n');
             }
-
             asciiOutput.innerHTML = parts.join('');
         } else {
-            // zwykły tekst
             asciiOutput.textContent = data.text;
         }
 
         lastAsciiText = data.text;
+        downloadBtn.disabled = false;
+    }
+
+    // render from buffer (no DOM rebuild for plain text)
+    function renderBufferedFrame(idx) {
+        var f = frameBuffer[idx];
+        if (!f) return;
+        placeholder.style.display = 'none';
+        asciiOutput.style.display = 'block';
+
+        if (f.html) {
+            asciiOutput.innerHTML = f.html;
+        } else {
+            asciiOutput.textContent = f.text;
+        }
+
+        lastAsciiText = f.text;
         downloadBtn.disabled = false;
     }
 
@@ -252,28 +232,33 @@
         statsText.textContent = t;
     }
 
-    // -- image conversion --
+    function updateFrameUI() {
+        frameSlider.value = currentFrame;
+        frameInfo.textContent = (currentFrame + 1) + '/' + totalFrames;
+        var buffered = frameBuffer.filter(function (f) { return f !== null && f !== undefined; }).length;
+        bufferInfoEl.textContent = 'bufor: ' + buffered + '/' + totalFrames + ' klatek';
+    }
+
+    // ====== IMAGE ======
 
     function convertImage() {
         if (!currentFile || converting) return;
         converting = true;
         convertBtn.disabled = true;
         convertBtn.textContent = '...';
+        showProgress('upload...', 0);
 
         var settings = getSettings();
         var fd = buildFormData(currentFile, settings);
         var start = performance.now();
 
-        showProgress('upload...', 0);
-
-        uploadWithProgress('/api/convert/image', fd, function (pct) {
+        uploadXHR('/api/convert/image', fd, function (pct) {
             showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
             if (pct >= 1) showProgress('przetwarzam...', -1);
         }).then(function (data) {
-            var elapsed = performance.now() - start;
             hideProgress();
             renderText(data);
-            updateStats(data, elapsed);
+            updateStats(data, performance.now() - start);
         }).catch(function (e) {
             hideProgress();
             appendLog({ timestamp: timeNow(), level: 'error', message: 'konwersja: ' + e.message });
@@ -284,28 +269,28 @@
         });
     }
 
-    // -- video upload --
+    // ====== VIDEO ======
 
     function uploadVideo() {
         if (!currentFile || converting) return;
         converting = true;
         convertBtn.disabled = true;
         convertBtn.textContent = '...';
+        showProgress('upload wideo...', 0);
 
         var settings = getSettings();
         var fd = buildFormData(currentFile, settings);
 
-        showProgress('upload wideo...', 0);
-
-        uploadWithProgress('/api/convert/video', fd, function (pct) {
+        uploadXHR('/api/convert/video', fd, function (pct) {
             showProgress('upload ' + Math.round(pct * 100) + '%', pct * 100);
-            if (pct >= 1) showProgress('analizuję wideo...', -1);
+            if (pct >= 1) showProgress('analiza wideo...', -1);
         }).then(function (data) {
-            hideProgress();
             videoSessionId = data.sessionId;
             totalFrames = data.totalFrames;
             videoFps = data.fps || 30;
             currentFrame = 0;
+            preloaded = false;
+            frameBuffer = new Array(totalFrames);
 
             frameSlider.max = totalFrames - 1;
             frameSlider.value = 0;
@@ -314,13 +299,14 @@
                 data.duration.toFixed(1) + 's | ' +
                 totalFrames + ' klatek';
             videoControls.style.display = 'block';
+            updateFrameUI();
 
             converting = false;
             convertBtn.disabled = false;
             convertBtn.textContent = 'konwertuj';
 
-            // załaduj pierwszą klatkę
-            return loadVideoFrame(0);
+            // rozpocznij preload klatek w tle
+            startPreload();
         }).catch(function (e) {
             hideProgress();
             appendLog({ timestamp: timeNow(), level: 'error', message: 'upload wideo: ' + e.message });
@@ -330,13 +316,144 @@
         });
     }
 
-    // -- video frame loading --
+    // preload raw frames na serwerze (jeden ffmpeg pass)
+    function startPreload() {
+        showProgress('ekstrakcja klatek...', 0);
 
-    function loadVideoFrame(frameNumber) {
+        var fd = new FormData();
+        fd.append('sessionId', videoSessionId);
+
+        fetch('/api/convert/preload', { method: 'POST', body: fd })
+            .then(function (resp) {
+                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
+                return resp.json();
+            })
+            .then(function (data) {
+                preloaded = true;
+                appendLog({ timestamp: timeNow(), level: 'info', message: 'preload: ' + data.extracted + '/' + data.total + ' klatek' });
+
+                // po preload - załaduj pierwszą klatkę i zacznij buforować
+                showProgress('konwersja ascii...', 0);
+                return bufferFrames(0, Math.min(bufferBatchSize, totalFrames));
+            })
+            .then(function () {
+                hideProgress();
+                if (frameBuffer[0]) {
+                    renderBufferedFrame(0);
+                    updateStats(frameBuffer[0]);
+                }
+                updateFrameUI();
+
+                // kontynuuj buforowanie w tle
+                bufferRemaining(bufferBatchSize);
+            })
+            .catch(function (e) {
+                hideProgress();
+                appendLog({ timestamp: timeNow(), level: 'error', message: 'preload: ' + e.message });
+                // fallback - ładuj klatki na żądanie
+                preloaded = false;
+                loadSingleFrame(0);
+            });
+    }
+
+    // buforuj batch klatek (konwersja ascii na serwerze)
+    function bufferFrames(startFrame, count) {
+        if (bufferingFrom === startFrame) return bufferingPromise;
+
+        var settings = getSettings();
+        var fd = buildFormData(null, settings, {
+            sessionId: videoSessionId,
+            startFrame: startFrame,
+            count: count
+        });
+
+        bufferingFrom = startFrame;
+
+        bufferingPromise = fetch('/api/convert/batch', { method: 'POST', body: fd })
+            .then(function (resp) {
+                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
+                return resp.json();
+            })
+            .then(function (frames) {
+                for (var i = 0; i < frames.length; i++) {
+                    var f = frames[i];
+                    var html = null;
+
+                    if (f.colors) {
+                        var binary = atob(f.colors);
+                        var colors = new Uint8Array(binary.length);
+                        for (var j = 0; j < binary.length; j++) colors[j] = binary.charCodeAt(j);
+
+                        var lines = f.text.split('\n');
+                        var parts = [];
+                        var ci = 0;
+                        for (var y = 0; y < lines.length; y++) {
+                            var line = lines[y];
+                            if (!line.length) continue;
+                            for (var x = 0; x < line.length; x++) {
+                                var idx2 = ci * 3;
+                                parts.push('<span style="color:rgb(' +
+                                    (colors[idx2] || 0) + ',' + (colors[idx2 + 1] || 0) + ',' + (colors[idx2 + 2] || 0) +
+                                    ')">' + esc(line[x]) + '</span>');
+                                ci++;
+                            }
+                            parts.push('\n');
+                        }
+                        html = parts.join('');
+                    }
+
+                    frameBuffer[f.frameNumber] = {
+                        text: f.text,
+                        html: html,
+                        columns: f.columns,
+                        rows: f.rows,
+                        colors: !!f.colors,
+                        frameNumber: f.frameNumber,
+                        totalFrames: f.totalFrames
+                    };
+                }
+
+                var pct = Math.round((startFrame + frames.length) / totalFrames * 100);
+                showProgress('konwersja ascii ' + pct + '%', pct);
+                updateFrameUI();
+
+                bufferingFrom = -1;
+                bufferingPromise = null;
+                return frames.length;
+            })
+            .catch(function (e) {
+                bufferingFrom = -1;
+                bufferingPromise = null;
+                appendLog({ timestamp: timeNow(), level: 'error', message: 'batch: ' + e.message });
+                return 0;
+            });
+
+        return bufferingPromise;
+    }
+
+    // buforuj resztę klatek w tle
+    function bufferRemaining(from) {
+        if (from >= totalFrames) {
+            hideProgress();
+            updateFrameUI();
+            return;
+        }
+
+        var count = Math.min(bufferBatchSize, totalFrames - from);
+        bufferFrames(from, count).then(function (got) {
+            if (got > 0) {
+                setTimeout(function () { bufferRemaining(from + got); }, 10);
+            } else {
+                hideProgress();
+            }
+        });
+    }
+
+    // fallback: ładuj jedną klatkę (bez preload)
+    function loadSingleFrame(frameNumber) {
         if (!videoSessionId) return Promise.resolve();
 
         showProgress('klatka ' + (frameNumber + 1) + '/' + totalFrames, -1);
-
         var start = performance.now();
         var settings = getSettings();
         var fd = buildFormData(null, settings, {
@@ -346,63 +463,91 @@
 
         return fetch('/api/convert/frame', { method: 'POST', body: fd })
             .then(function (resp) {
-                if (!resp.ok) {
-                    return resp.text().then(function (t) { throw new Error(t); });
-                }
+                if (!resp.ok) return resp.text().then(function (t) { throw new Error(t); });
                 return resp.json();
             })
             .then(function (data) {
-                var elapsed = performance.now() - start;
                 currentFrame = data.frameNumber;
-                frameSlider.value = currentFrame;
-                frameInfo.textContent = (currentFrame + 1) + '/' + data.totalFrames;
                 renderText(data);
-                updateStats(data, elapsed);
+                updateStats(data, performance.now() - start);
+                updateFrameUI();
                 hideProgress();
             })
             .catch(function (e) {
                 hideProgress();
-                appendLog({ timestamp: timeNow(), level: 'error', message: 'klatka ' + frameNumber + ': ' + e.message });
+                appendLog({ timestamp: timeNow(), level: 'error', message: 'klatka: ' + e.message });
             });
     }
 
-    // -- video playback --
+    // -- wyświetl klatkę (z bufora lub fallback) --
 
-    function sleep(ms) {
-        return new Promise(function (r) { setTimeout(r, ms); });
+    function showFrame(idx) {
+        idx = Math.max(0, Math.min(idx, totalFrames - 1));
+        currentFrame = idx;
+
+        if (frameBuffer[idx]) {
+            renderBufferedFrame(idx);
+            updateStats(frameBuffer[idx]);
+            updateFrameUI();
+        } else {
+            loadSingleFrame(idx);
+        }
     }
+
+    // ====== PLAYBACK ======
 
     function startPlayback() {
         if (isPlaying || !videoSessionId) return;
+        if (currentFrame >= totalFrames - 1) currentFrame = 0;
+
         isPlaying = true;
         playBtn.textContent = '⏸';
+        playBtn.classList.add('playing');
 
-        var frameDelay = Math.max(100, 1000 / Math.min(videoFps, 8));
+        var lastTime = performance.now();
+        var frameInterval = 1000 / (videoFps * playSpeed);
 
-        (function loop() {
-            if (!isPlaying || currentFrame >= totalFrames - 1) {
-                stopPlayback();
-                return;
+        function tick(now) {
+            if (!isPlaying) return;
+
+            var delta = now - lastTime;
+            if (delta >= frameInterval) {
+                lastTime = now - (delta % frameInterval);
+
+                currentFrame++;
+                if (currentFrame >= totalFrames) {
+                    stopPlayback();
+                    return;
+                }
+
+                if (frameBuffer[currentFrame]) {
+                    renderBufferedFrame(currentFrame);
+                    updateFrameUI();
+                } else {
+                    // nie ma w buforze - czekaj
+                    currentFrame--;
+                    updateFrameUI();
+                }
             }
-            currentFrame++;
-            var start = performance.now();
-            loadVideoFrame(currentFrame).then(function () {
-                if (!isPlaying) return;
-                var elapsed = performance.now() - start;
-                var wait = Math.max(0, frameDelay - elapsed);
-                return sleep(wait);
-            }).then(function () {
-                if (isPlaying) loop();
-            });
-        })();
+
+            playRafId = requestAnimationFrame(tick);
+        }
+
+        playRafId = requestAnimationFrame(tick);
     }
 
     function stopPlayback() {
         isPlaying = false;
         playBtn.textContent = '▶ play';
+        playBtn.classList.remove('playing');
+        if (playRafId) {
+            cancelAnimationFrame(playRafId);
+            playRafId = null;
+        }
+        updateFrameUI();
     }
 
-    // -- download .txt --
+    // -- download --
 
     function downloadTxt() {
         if (!lastAsciiText) return;
@@ -415,14 +560,28 @@
         URL.revokeObjectURL(url);
     }
 
-    // -- event listeners --
+    // -- re-buforuj z nowymi ustawieniami --
+
+    function rebufferVideo() {
+        if (!videoSessionId || !preloaded) return;
+        // wyczyść bufor
+        frameBuffer = new Array(totalFrames);
+        stopPlayback();
+        showProgress('re-konwersja...', 0);
+        bufferFrames(0, Math.min(bufferBatchSize, totalFrames)).then(function () {
+            if (frameBuffer[currentFrame]) {
+                renderBufferedFrame(currentFrame);
+                updateStats(frameBuffer[currentFrame]);
+            }
+            bufferRemaining(bufferBatchSize);
+        });
+    }
+
+    // ====== EVENT LISTENERS ======
 
     fileInput.addEventListener('change', function (e) {
         currentFile = e.target.files[0];
-        if (!currentFile) {
-            convertBtn.disabled = true;
-            return;
-        }
+        if (!currentFile) { convertBtn.disabled = true; return; }
 
         var ext = currentFile.name.split('.').pop().toLowerCase();
         isVideo = ['mp4', 'avi', 'mkv', 'webm', 'mov', 'flv', 'wmv'].indexOf(ext) !== -1;
@@ -432,6 +591,8 @@
         videoSessionId = null;
         videoControls.style.display = 'none';
         stopPlayback();
+        frameBuffer = [];
+        preloaded = false;
         convertBtn.disabled = false;
     });
 
@@ -442,35 +603,38 @@
 
     downloadBtn.addEventListener('click', downloadTxt);
 
-    stepRange.addEventListener('input', function () {
-        stepValue.textContent = stepRange.value;
-    });
-    maxColsRange.addEventListener('input', function () {
-        maxColsValue.textContent = maxColsRange.value;
-    });
-    thresholdRange.addEventListener('input', function () {
-        thresholdValue.textContent = thresholdRange.value;
-    });
+    // suwaki
+    stepRange.addEventListener('input', function () { stepValue.textContent = stepRange.value; });
+    maxColsRange.addEventListener('input', function () { maxColsValue.textContent = maxColsRange.value; });
+    thresholdRange.addEventListener('input', function () { thresholdValue.textContent = thresholdRange.value; });
     fontSizeRange.addEventListener('input', function () {
         fontSizeValue.textContent = fontSizeRange.value;
         asciiOutput.style.fontSize = fontSizeRange.value + 'px';
         asciiOutput.style.lineHeight = Math.round(parseInt(fontSizeRange.value) * 1.1) + 'px';
     });
+    speedRange.addEventListener('input', function () {
+        playSpeed = parseInt(speedRange.value) / 10;
+        speedValue.textContent = playSpeed.toFixed(1);
+    });
 
+    // zmiana efektu -> re-buforuj
+    effectSelect.addEventListener('change', function () {
+        if (isVideo && videoSessionId && preloaded) {
+            rebufferVideo();
+        } else if (!isVideo && currentFile && lastAsciiText) {
+            convertImage();
+        }
+    });
+
+    // video nav
     prevFrameBtn.addEventListener('click', function () {
         stopPlayback();
-        if (currentFrame > 0) {
-            currentFrame--;
-            loadVideoFrame(currentFrame);
-        }
+        if (currentFrame > 0) showFrame(currentFrame - 1);
     });
 
     nextFrameBtn.addEventListener('click', function () {
         stopPlayback();
-        if (currentFrame < totalFrames - 1) {
-            currentFrame++;
-            loadVideoFrame(currentFrame);
-        }
+        if (currentFrame < totalFrames - 1) showFrame(currentFrame + 1);
     });
 
     playBtn.addEventListener('click', function () {
@@ -478,13 +642,19 @@
         else startPlayback();
     });
 
+    stopBtn.addEventListener('click', function () {
+        stopPlayback();
+        currentFrame = 0;
+        showFrame(0);
+    });
+
     frameSlider.addEventListener('input', function () {
         stopPlayback();
         currentFrame = parseInt(frameSlider.value);
-        loadVideoFrame(currentFrame);
+        showFrame(currentFrame);
     });
 
-    // log panel toggle
+    // logi
     logToggle.addEventListener('click', function () {
         logOpen = !logOpen;
         logBody.style.display = logOpen ? 'block' : 'none';
@@ -497,6 +667,27 @@
         logCount = 0;
         logBadge.textContent = '0';
         logBadge.classList.remove('error');
+    });
+
+    // keyboard
+    document.addEventListener('keydown', function (e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+        if (isVideo && videoSessionId) {
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                stopPlayback();
+                if (currentFrame > 0) showFrame(currentFrame - 1);
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                stopPlayback();
+                if (currentFrame < totalFrames - 1) showFrame(currentFrame + 1);
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                if (isPlaying) stopPlayback();
+                else startPlayback();
+            }
+        }
     });
 
     // init

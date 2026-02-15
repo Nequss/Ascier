@@ -16,7 +16,7 @@
         <div class="main-layout">
             <aside class="controls">
                 <div class="control-group">
-                    <label>plik (obraz lub wideo)</label>
+                    <label>plik</label>
                     <input type="file" id="fileInput" accept="image/*,video/*">
                     <div class="file-info" id="fileInfo"></div>
                 </div>
@@ -73,22 +73,30 @@
                     <button id="downloadBtn" class="btn btn-secondary" disabled>pobierz .txt</button>
                 </div>
 
+                <!-- progress -->
                 <div class="control-group" id="progressGroup" style="display:none">
-                    <label id="progressLabel">upload...</label>
+                    <label id="progressLabel">...</label>
                     <div class="progress-bar">
                         <div class="progress-fill" id="progressFill"></div>
                     </div>
                 </div>
 
+                <!-- video controls -->
                 <div class="control-group video-controls" id="videoControls" style="display:none">
                     <label>klatka: <span id="frameInfo">0/0</span></label>
                     <div class="frame-nav">
                         <button id="prevFrame" class="btn btn-small">◀</button>
-                        <button id="playBtn" class="btn btn-small">▶ play</button>
+                        <button id="playBtn" class="btn btn-small btn-play">▶ play</button>
                         <button id="nextFrame" class="btn btn-small">▶</button>
+                        <button id="stopBtn" class="btn btn-small">⏹</button>
                     </div>
                     <input type="range" id="frameSlider" min="0" max="0" value="0">
+                    <div class="speed-control">
+                        <label>szybkość: <span id="speedValue">1.0</span>x</label>
+                        <input type="range" id="speedRange" min="1" max="30" value="10">
+                    </div>
                     <div class="video-meta" id="videoMeta"></div>
+                    <div class="buffer-info" id="bufferInfo"></div>
                 </div>
 
                 <div class="control-group stats" id="stats">
@@ -110,6 +118,7 @@
             </main>
         </div>
 
+        <!-- log panel -->
         <div class="log-panel" id="logPanel">
             <div class="log-header" id="logToggle">
                 <span>logi</span>

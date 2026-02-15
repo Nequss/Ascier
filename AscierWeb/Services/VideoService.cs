@@ -6,18 +6,13 @@ using System.Collections.Concurrent;
 namespace AscierWeb.Services;
 
 // serwis konwersji wideo na ascii
-// wyodrębnia klatki za pomocą ffmpeg (pipe do stdout jako surowe rgb24)
-// przetwarza jedną klatkę na żądanie - minimalne użycie ram
-// cache klatek na dysku (~10gb dostępne) zamiast w pamięci
+// single-pass ekstrakcja wszystkich klatek przez ffmpeg pipe
+// cache klatek na dysku, batch konwersja do ascii
 public sealed class VideoService : IDisposable
 {
     private readonly ImageService _imageService;
     private readonly string _tempRoot;
-
-    // aktywne sesje wideo (id sesji -> metadane)
     private readonly ConcurrentDictionary<string, VideoSession> _sessions = new();
-
-    // timer czyszczenia starych sesji
     private readonly Timer _cleanupTimer;
 
     public VideoService(ImageService imageService)
@@ -25,12 +20,9 @@ public sealed class VideoService : IDisposable
         _imageService = imageService;
         _tempRoot = Path.Combine(Path.GetTempPath(), "ascier_video");
         Directory.CreateDirectory(_tempRoot);
-
-        // czyszczenie sesji starszych niż 30 minut
         _cleanupTimer = new Timer(_ => CleanupSessions(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
     }
 
-    // tworzy nową sesję wideo - analizuje plik i zwraca metadane
     public async Task<VideoSession> CreateSessionAsync(Stream videoStream, string fileName)
     {
         string sessionId = Guid.NewGuid().ToString("N")[..12];
@@ -43,7 +35,6 @@ public sealed class VideoService : IDisposable
             await videoStream.CopyToAsync(fs);
         }
 
-        // ffprobe - wyciąga metadane wideo (wymiary, fps, czas trwania)
         var probeInfo = await ProbeVideoAsync(videoPath);
 
         var session = new VideoSession
@@ -63,7 +54,61 @@ public sealed class VideoService : IDisposable
         return session;
     }
 
-    // wyodrębnia i konwertuje pojedynczą klatkę
+    // preload - ekstrakcja WSZYSTKICH klatek w jednym przebiegu ffmpeg
+    // dużo szybsze niż individual seek per frame
+    public async Task<int> PreloadFramesAsync(string sessionId, Action<int, int>? onProgress = null)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return 0;
+
+        session.LastAccess = DateTime.UtcNow;
+        int frameSize = session.Width * session.Height * 3;
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            Arguments = $"-i \"{session.VideoPath}\" -f rawvideo -pix_fmt rgb24 -v quiet pipe:1",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(psi);
+        if (process == null) return 0;
+
+        var stdout = process.StandardOutput.BaseStream;
+        byte[] buffer = new byte[frameSize];
+        int extracted = 0;
+
+        while (extracted < session.TotalFrames)
+        {
+            int totalRead = 0;
+            while (totalRead < frameSize)
+            {
+                int read = await stdout.ReadAsync(buffer, totalRead, frameSize - totalRead);
+                if (read == 0) goto done;
+                totalRead += read;
+            }
+
+            string cachePath = Path.Combine(session.TempDir, $"frame_{extracted:D6}.rgb");
+            if (!File.Exists(cachePath))
+            {
+                await File.WriteAllBytesAsync(cachePath, buffer);
+            }
+
+            extracted++;
+            onProgress?.Invoke(extracted, session.TotalFrames);
+        }
+
+        done:
+        await process.WaitForExitAsync();
+
+        session.PreloadedFrames = extracted;
+        return extracted;
+    }
+
+    // konwersja pojedynczej klatki (z cache lub ffmpeg seek jako fallback)
     public async Task<AscierWeb.Core.AsciiFrame?> GetFrameAsync(
         string sessionId,
         int frameNumber,
@@ -75,27 +120,21 @@ public sealed class VideoService : IDisposable
         session.LastAccess = DateTime.UtcNow;
         frameNumber = Math.Clamp(frameNumber, 0, session.TotalFrames - 1);
 
-        // sprawdź cache klatki na dysku
         string frameCachePath = Path.Combine(session.TempDir, $"frame_{frameNumber:D6}.rgb");
         byte[] rgb24;
 
         if (File.Exists(frameCachePath))
         {
-            // klatka w cache - odczyt z dysku
             rgb24 = await File.ReadAllBytesAsync(frameCachePath);
         }
         else
         {
-            // ekstrakcja klatki z ffmpeg
-            rgb24 = await ExtractFrameAsync(session, frameNumber);
+            rgb24 = await ExtractSingleFrameAsync(session, frameNumber);
             if (rgb24.Length == 0) return null;
-
-            // zapis do cache na dysku (10gb dostępne)
             await File.WriteAllBytesAsync(frameCachePath, rgb24);
         }
 
-        settings.Seed = frameNumber; // seed dla efektu matrix
-
+        settings.Seed = frameNumber;
         var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, settings);
         return frame with
         {
@@ -104,14 +143,60 @@ public sealed class VideoService : IDisposable
         };
     }
 
-    // ekstrakcja jednej klatki jako surowe rgb24 piped z ffmpeg
-    private async Task<byte[]> ExtractFrameAsync(VideoSession session, int frameNumber)
+    // batch konwersja wielu klatek naraz - zwraca tablicę
+    public async Task<List<AscierWeb.Core.AsciiFrame>> GetFrameBatchAsync(
+        string sessionId,
+        int startFrame,
+        int count,
+        AscierWeb.Core.ConversionSettings settings)
     {
-        // czas klatki w sekundach
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return new List<AscierWeb.Core.AsciiFrame>();
+
+        session.LastAccess = DateTime.UtcNow;
+        var results = new List<AscierWeb.Core.AsciiFrame>();
+        int end = Math.Min(startFrame + count, session.TotalFrames);
+
+        for (int i = startFrame; i < end; i++)
+        {
+            string cachePath = Path.Combine(session.TempDir, $"frame_{i:D6}.rgb");
+            if (!File.Exists(cachePath)) break;
+
+            byte[] rgb24 = await File.ReadAllBytesAsync(cachePath);
+            var s = new AscierWeb.Core.ConversionSettings
+            {
+                Effect = settings.Effect,
+                Step = settings.Step,
+                ColorMode = settings.ColorMode,
+                Threshold = settings.Threshold,
+                Invert = settings.Invert,
+                MaxColumns = settings.MaxColumns,
+                Seed = i
+            };
+
+            var frame = _imageService.ConvertRaw(rgb24, session.Width, session.Height, s);
+            results.Add(frame with
+            {
+                FrameNumber = i,
+                TotalFrames = session.TotalFrames
+            });
+        }
+
+        return results;
+    }
+
+    public VideoSession? GetSession(string sessionId)
+    {
+        _sessions.TryGetValue(sessionId, out var session);
+        return session;
+    }
+
+    // fallback - ekstrakcja jednej klatki z seek (wolne, używane tylko gdy brak cache)
+    private async Task<byte[]> ExtractSingleFrameAsync(VideoSession session, int frameNumber)
+    {
         double timeSeconds = session.Fps > 0 ? frameNumber / session.Fps : 0;
         int expectedSize = session.Width * session.Height * 3;
 
-        // ffmpeg seeking + ekstrakcja jednej klatki jako raw rgb24
         var psi = new ProcessStartInfo
         {
             FileName = "ffmpeg",
@@ -126,7 +211,6 @@ public sealed class VideoService : IDisposable
         using var process = Process.Start(psi);
         if (process == null) return Array.Empty<byte>();
 
-        // odczyt surowych bajtów ze stdout
         byte[] buffer = ArrayPool<byte>.Shared.Rent(expectedSize);
         int totalRead = 0;
 
@@ -155,7 +239,6 @@ public sealed class VideoService : IDisposable
         }
     }
 
-    // ffprobe - analiza metadanych wideo
     private async Task<VideoProbeResult> ProbeVideoAsync(string path)
     {
         var psi = new ProcessStartInfo
@@ -179,7 +262,6 @@ public sealed class VideoService : IDisposable
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            // szukamy pierwszego strumienia wideo
             if (root.TryGetProperty("streams", out var streams))
             {
                 foreach (var stream in streams.EnumerateArray())
@@ -190,7 +272,6 @@ public sealed class VideoService : IDisposable
                         int w = stream.TryGetProperty("width", out var wp) ? wp.GetInt32() : 0;
                         int h = stream.TryGetProperty("height", out var hp) ? hp.GetInt32() : 0;
 
-                        // fps z r_frame_rate (np. "30/1" lub "30000/1001")
                         double fps = 30;
                         if (stream.TryGetProperty("r_frame_rate", out var fpsStr))
                         {
@@ -203,7 +284,6 @@ public sealed class VideoService : IDisposable
                             }
                         }
 
-                        // czas trwania z format.duration
                         double duration = 0;
                         if (root.TryGetProperty("format", out var format) &&
                             format.TryGetProperty("duration", out var durProp))
@@ -212,7 +292,6 @@ public sealed class VideoService : IDisposable
                                 System.Globalization.CultureInfo.InvariantCulture, out duration);
                         }
 
-                        // fallback: duration ze streamu
                         if (duration <= 0 && stream.TryGetProperty("duration", out var sdur))
                         {
                             double.TryParse(sdur.GetString(), System.Globalization.NumberStyles.Float,
@@ -222,7 +301,6 @@ public sealed class VideoService : IDisposable
                         int totalFrames = (int)(duration * fps);
                         if (totalFrames <= 0)
                         {
-                            // fallback: nb_frames
                             if (stream.TryGetProperty("nb_frames", out var nbf) &&
                                 int.TryParse(nbf.GetString(), out int nb))
                             {
@@ -246,15 +324,11 @@ public sealed class VideoService : IDisposable
                 }
             }
         }
-        catch
-        {
-            // błąd parsowania json - zwracamy wartości domyślne
-        }
+        catch { }
 
         return new VideoProbeResult();
     }
 
-    // czyszczenie sesji starszych niż 30 minut
     private void CleanupSessions()
     {
         var cutoff = DateTime.UtcNow.AddMinutes(-30);
@@ -268,14 +342,10 @@ public sealed class VideoService : IDisposable
                 if (Directory.Exists(session.TempDir))
                     Directory.Delete(session.TempDir, true);
             }
-            catch
-            {
-                // ignorujemy błędy czyszczenia
-            }
+            catch { }
         }
     }
 
-    // sanityzacja nazwy pliku - usuwa niebezpieczne znaki
     private static string SanitizeFileName(string name)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -286,8 +356,6 @@ public sealed class VideoService : IDisposable
     public void Dispose()
     {
         _cleanupTimer.Dispose();
-
-        // czyszczenie wszystkich sesji
         foreach (var (_, session) in _sessions)
         {
             try
@@ -300,7 +368,6 @@ public sealed class VideoService : IDisposable
     }
 }
 
-// metadane sesji wideo
 public sealed class VideoSession
 {
     public string Id { get; init; } = "";
@@ -311,10 +378,10 @@ public sealed class VideoSession
     public double Fps { get; init; }
     public double Duration { get; init; }
     public int TotalFrames { get; init; }
+    public int PreloadedFrames { get; set; }
     public DateTime LastAccess { get; set; }
 }
 
-// wynik analizy ffprobe
 internal struct VideoProbeResult
 {
     public int Width;
