@@ -1,11 +1,5 @@
 ﻿using System;
-using ImageMagick;
-using Xabe.FFmpeg;
 using System.IO;
-using System.Threading;
-using System.Collections.Generic;
-using System.Windows;
-using Ascier.Converters;
 using CLI_Sharp;
 using Xabe.FFmpeg.Downloader;
 
@@ -27,10 +21,11 @@ namespace Ascier
 
             for (int i = 0; i < directories.Length; i++)
             {
-                if (!Directory.Exists($"{Directory.GetCurrentDirectory()}/{directories[i]}"))
+                string dirPath = Path.Combine(Directory.GetCurrentDirectory(), directories[i]);
+                if (!Directory.Exists(dirPath))
                 {
                     Program.Logger.info($"The following directory has not been found.");
-                    Program.Logger.info($"{Directory.GetCurrentDirectory()}/{directories[i]}");
+                    Program.Logger.info(dirPath);
 
                     Directory.CreateDirectory(directories[i]);
 
@@ -44,12 +39,13 @@ namespace Ascier
 
             Display.forceRedraw();
 
-            var status = FFmpegDownloader.GetLatestVersion(FFmpegVersion.Official, $"{Directory.GetCurrentDirectory()}/ffmpeg");
+            string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
+            var status = FFmpegDownloader.GetLatestVersion(FFmpegVersion.Official, ffmpegPath);
 
             if (!status.IsCompleted)
             {
                 Program.Logger.info("Downloading FFMPEG library for video conversion.");
-                while (!status.IsCompleted);
+                status.GetAwaiter().GetResult();
                 Program.Logger.info("Done.");
             }
             else

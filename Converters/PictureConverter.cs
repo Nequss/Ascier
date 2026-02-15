@@ -1,110 +1,71 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using ImageMagick;
 using SFML.Graphics;
 using SFML.System;
-using SFML.Window;
 
 namespace Ascier.Converters
 {
     public class PictureConverter
     {
-        private byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
-        private Text text = new Text(" ", new Font("font.ttf"));
+        // ASCII density ramp: dark ('#') to light (' ')
+        private static readonly byte[] chars = { 35, 64, 37, 61, 43, 42, 58, 45, 126, 46, 32 };
+
+        // Pre-built string lookup: eliminates per-pixel ToString() allocation
+        private static readonly string[] charStrings;
+
+        // 256-byte LUT: maps grey value -> char index, eliminates /25 division in hot loop
+        private static readonly byte[] greyToCharIndex;
+
+        private readonly Text text;
         private Vector2f position = new Vector2f();
 
-        /*  
-        public void SaveAsciiFrame(bool mode, string path, uint fontSize, Color background)
+        static PictureConverter()
         {
-            var image = new Image(path);
+            charStrings = new string[chars.Length];
+            for (int i = 0; i < chars.Length; i++)
+                charStrings[i] = ((char)chars[i]).ToString();
 
-            RenderTexture renderTexture = new RenderTexture(image.Size.X, image.Size.Y);
-            renderTexture.Clear(background);
-
-            for (uint x = 0; x < image.Size.X; x += fontSize)
+            greyToCharIndex = new byte[256];
+            for (int i = 0; i < 256; i++)
             {
-                for (uint y = 0; y < image.Size.Y; y += fontSize)
-                {
-                    var tmpPixel = image.GetPixel((uint)x, (uint)y);
-                    var greyPixel = GetGreyscale(tmpPixel);
-
-                    if (mode) //color mode
-                    {
-                        position.X = x;
-                        position.Y = y;
-                        text.Position = position;
-                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
-                        text.CharacterSize = fontSize;
-                        text.FillColor = tmpPixel;
-                    }
-                    else //greyscale mode
-                    {
-                        position.X = x;
-                        position.Y = y;
-                        text.Position = position;
-                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
-                        text.CharacterSize = fontSize;
-                        text.FillColor = greyPixel;
-                    }
-
-                    renderTexture.Draw(text);
-                }
+                int idx = i / 25;
+                greyToCharIndex[i] = (byte)(idx < chars.Length ? idx : chars.Length - 1);
             }
-
-            Texture texture = renderTexture.Texture;
-            path = $"{Directory.GetCurrentDirectory()}/ascii_temp/{Path.GetFileName(path)}";
-            texture.CopyToImage().SaveToFile(path);
         }
-        */
+
+        public PictureConverter()
+        {
+            text = new Text(" ", new Font("font.ttf"));
+        }
 
         public void DrawPreview(RenderWindow window, bool mode, string path, uint fontSize, Color background)
         {
             window.Clear(background);
 
-            var image = new Image(path);
-
-            for (uint y = 0; y < image.Size.Y; y += fontSize)
+            using (var image = new Image(path))
             {
-                for (uint x = 0; x < image.Size.X; x += fontSize)
+                uint imgH = image.Size.Y;
+                uint imgW = image.Size.X;
+
+                for (uint y = 0; y < imgH; y += fontSize)
                 {
-                    var tmpPixel = image.GetPixel((uint)x, (uint)y);
-                    var greyPixel = GetGreyscale(tmpPixel);
-
-                    if (mode) //color mode
+                    for (uint x = 0; x < imgW; x += fontSize)
                     {
+                        Color pixel = image.GetPixel(x, y);
+
+                        // Fast greyscale: (R + 2G + B) >> 2  — perceptual 1:2:1 weighting via bit shift
+                        byte grey = (byte)((pixel.R + (pixel.G << 1) + pixel.B) >> 2);
+
                         position.X = x;
                         position.Y = y;
                         text.Position = position;
-                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
+                        text.DisplayedString = charStrings[greyToCharIndex[grey]];
                         text.CharacterSize = fontSize;
-                        text.FillColor = tmpPixel;
-                    }
-                    else //greyscale mode
-                    {
-                        position.X = x;
-                        position.Y = y;
-                        text.Position = position;
-                        text.DisplayedString = ((char)chars[greyPixel.R / 25]).ToString();
-                        text.CharacterSize = fontSize;
-                        text.FillColor = greyPixel;
-                    }
+                        text.FillColor = mode ? pixel : new Color(grey, grey, grey);
 
-                    window.Draw(text);
+                        window.Draw(text);
+                    }
                 }
             }
-        }
-
-        private Color GetGreyscale(Color pixelColor)
-        {
-            int red = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
-            int green = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
-            int blue = (pixelColor.R + pixelColor.G + pixelColor.B) / 3;
-
-            return new Color((byte)red, (byte)green, (byte)blue);
         }
     }
 }

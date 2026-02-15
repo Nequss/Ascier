@@ -1,14 +1,9 @@
 ﻿using Ascier.Converters;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ImageMagick;
+using System.IO;
 using SFML.Graphics;
 using SFML.System;
 using SFML.Window;
-using System.IO;
 
 namespace Ascier.Screen
 {
@@ -26,6 +21,7 @@ namespace Ascier.Screen
         private bool isVideo;
         private int index = 6;
 
+        // 8 entries (power of 2) — enables & 7 bitwise wrap
         private Color[] colorArray = {
                         Color.Blue,
                         Color.White,
@@ -40,34 +36,39 @@ namespace Ascier.Screen
         {
             path = _path;
             isVideo = _isVideo;
-            size = (Vector2i)new Image(path).Size;
 
-            lastFrame = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/temp").Length;
+            using (var img = new Image(path))
+                size = (Vector2i)img.Size;
 
             if (isVideo)
+            {
+                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "temp");
+                lastFrame = Directory.GetFiles(tempDir).Length;
+
                 if (lastFrame > 999)
                 {
-                    padded = "";
-                    foreach (char c in lastFrame.ToString())
-                        padded += "0";
+                    padded = new string('0', lastFrame.ToString().Length);
                 }
+            }
         }
 
         public void PreviewFrame()
         {
-            RenderWindow window = new RenderWindow(new VideoMode((uint)size.X, (uint)size.Y), "ASCII Preview");
-            window.SetVisible(true);
-            window.SetFramerateLimit(30);
-
-            window.Closed += (_, __) => window.Close();
-            window.KeyPressed += Window_KeyPressed;
-            window.KeyReleased += Window_KeyReleased;
-
-            Draw(window, mode, fontSize);
-
-            while (window.IsOpen)
+            using (RenderWindow window = new RenderWindow(new VideoMode((uint)size.X, (uint)size.Y), "ASCII Preview"))
             {
-                window.DispatchEvents();
+                window.SetVisible(true);
+                window.SetFramerateLimit(30);
+
+                window.Closed += (_, __) => window.Close();
+                window.KeyPressed += Window_KeyPressed;
+                window.KeyReleased += Window_KeyReleased;
+
+                Draw(window, mode, fontSize);
+
+                while (window.IsOpen)
+                {
+                    window.DispatchEvents();
+                }
             }
         }
 
@@ -83,7 +84,7 @@ namespace Ascier.Screen
                         if (frame < lastFrame)
                         {
                             frame++;
-                            path = Path.Combine(Path.GetDirectoryName(path), $"{padded.Substring(frame.ToString().Length) + frame}{Path.GetExtension(path)}");
+                            path = BuildFramePath();
                             Draw(window, mode, fontSize);
                         }
                     }
@@ -100,12 +101,19 @@ namespace Ascier.Screen
                         }
                         else
                         {
-                            path = Path.Combine(Path.GetDirectoryName(path), $"{padded.Substring(frame.ToString().Length) + frame}{Path.GetExtension(path)}");
+                            path = BuildFramePath();
                             Draw(window, mode, fontSize);
                         }
                     }
                     break;
             }
+        }
+
+        private string BuildFramePath()
+        {
+            string frameStr = frame.ToString();
+            string paddedFrame = padded.Substring(frameStr.Length) + frameStr;
+            return Path.Combine(Path.GetDirectoryName(path), $"{paddedFrame}{Path.GetExtension(path)}");
         }
 
         private void Window_KeyReleased(object sender, KeyEventArgs e)
@@ -117,16 +125,19 @@ namespace Ascier.Screen
                 case Keyboard.Key.C:
                     if (isVideo)
                     {
-                        if (Directory.Exists($"{Directory.GetCurrentDirectory()}/ascii_temp"))
+                        string asciiTempDir = Path.Combine(Directory.GetCurrentDirectory(), "ascii_temp");
+
+                        if (Directory.Exists(asciiTempDir))
                         {
                             Program.Logger.info("Deleting ascii temp existing files...");
                             Program.Display.forceRedraw();
-                            Directory.Delete($"{Directory.GetCurrentDirectory()}/ascii_temp", true);
+                            Directory.Delete(asciiTempDir, true);
                         }
 
-                        Directory.CreateDirectory($"{Directory.GetCurrentDirectory()}/ascii_temp");
+                        Directory.CreateDirectory(asciiTempDir);
 
-                        string[] files = Directory.GetFiles($"{Directory.GetCurrentDirectory()}/temp");
+                        string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "temp");
+                        string[] files = Directory.GetFiles(tempDir);
 
                         Program.Logger.info($"Frames to convert: {files.Length}");
 
@@ -138,11 +149,14 @@ namespace Ascier.Screen
                             pictureConverter.DrawPreview(window, mode, files[i], fontSize, colorArray[index]);
                             window.Display();
 
-                            path = $"{Directory.GetCurrentDirectory()}/ascii_temp/{Path.GetFileName(files[i])}";
+                            string savePath = Path.Combine(asciiTempDir, Path.GetFileName(files[i]));
 
-                            Texture texture = new Texture((uint)size.X, (uint)size.Y);
-                            texture.Update(window);
-                            texture.CopyToImage().SaveToFile(path);
+                            using (Texture texture = new Texture((uint)size.X, (uint)size.Y))
+                            {
+                                texture.Update(window);
+                                using (var img = texture.CopyToImage())
+                                    img.SaveToFile(savePath);
+                            }
                         }
 
                         window.Close();
@@ -176,48 +190,35 @@ namespace Ascier.Screen
                     break;
 
                 case Keyboard.Key.B:
-
-
-                    for (int i = 0; i < colorArray.Length; i++)
-                    {
-                        if (i == index)
-                        {
-                            index += 1;
-
-                            if (index > colorArray.Length - 1)
-                            {
-                                index = 0;
-                                window.Clear(colorArray[index]);
-                                Draw(window, mode, fontSize);
-                            }
-                            else
-                            {
-                                window.Clear(colorArray[index]);
-                                Draw(window, mode, fontSize);
-                            }
-
-                            break;
-                        }
-                    }
+                    // colorArray.Length is 8 (power of 2) — bitwise AND replaces modulo
+                    index = (index + 1) & 7;
+                    window.Clear(colorArray[index]);
+                    Draw(window, mode, fontSize);
                     break;
             }
         }
 
-        private void SavePreview(RenderWindow window, string path)
+        private void SavePreview(RenderWindow window, string savePath)
         {
-            Texture texture = new Texture((uint)size.X, (uint)size.Y);
-            texture.Update(window);
-
-            path = $"{Directory.GetCurrentDirectory()}/output/{Path.GetFileNameWithoutExtension(path)}_{DateTime.Now.Ticks}{Path.GetExtension(path)}";
-
-            if (texture.CopyToImage().SaveToFile(path))
+            using (Texture texture = new Texture((uint)size.X, (uint)size.Y))
             {
-                Program.Logger.info("Saved:");
-                Program.Logger.info(path);
-            }
-            else
-            {
-                Program.Logger.info("Failed to save the image!");
+                texture.Update(window);
+
+                string outputPath = Path.Combine(Directory.GetCurrentDirectory(), "output",
+                    $"{Path.GetFileNameWithoutExtension(savePath)}_{DateTime.Now.Ticks}{Path.GetExtension(savePath)}");
+
+                using (var img = texture.CopyToImage())
+                {
+                    if (img.SaveToFile(outputPath))
+                    {
+                        Program.Logger.info("Saved:");
+                        Program.Logger.info(outputPath);
+                    }
+                    else
+                    {
+                        Program.Logger.info("Failed to save the image!");
+                    }
+                }
             }
         }
 
